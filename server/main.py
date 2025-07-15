@@ -10,6 +10,12 @@ from datetime import datetime
 from core.log_manager import LogManager
 from core.config_manager import ConfigManager
 from core.file_watcher import FileWatcher
+from core.directory_manager import DirectoryManager
+from api.directory_routes import directory_routes
+
+# Crear instancias compartidas
+directory_manager = DirectoryManager()
+log_manager = LogManager(directory_manager=directory_manager)
 
 def kill_process_on_port(port):
     """
@@ -99,6 +105,7 @@ def is_port_available(port):
 def ensure_port_available(port):
     """
     Asegura que el puerto esté disponible, liberándolo si es necesario.
+    Intenta múltiples veces y métodos para liberar el puerto.
 
     Args:
         port (int): Puerto a asegurar
@@ -106,42 +113,55 @@ def ensure_port_available(port):
     Returns:
         bool: True si el puerto está disponible, False si no se pudo liberar
     """
-    if is_port_available(port):
-        print(f"✅ Puerto {port} está disponible")
-        return True
+    max_attempts = 3
 
-    print(f"⚠️  Puerto {port} está ocupado, intentando liberar...")
-    if kill_process_on_port(port):
-        # Esperar un momento para que el puerto se libere
-        import time
-        time.sleep(1)
-
+    for attempt in range(max_attempts):
         if is_port_available(port):
-            print(f"✅ Puerto {port} liberado exitosamente")
+            print(f"✅ Puerto {port} está disponible")
             return True
-        else:
-            print(f"❌ No se pudo liberar el puerto {port}")
-            return False
-    else:
-        print(f"❌ No se encontraron procesos usando el puerto {port}, pero sigue ocupado")
-        return False
+
+        print(f"⚠️  Puerto {port} está ocupado (intento {attempt + 1}/{max_attempts}), intentando liberar...")
+
+        # Intentar liberar el puerto
+        if kill_process_on_port(port):
+            # Esperar un momento para que el puerto se libere
+            import time
+            time.sleep(2)  # Aumentar el tiempo de espera
+
+            # Verificar nuevamente
+            if is_port_available(port):
+                print(f"✅ Puerto {port} liberado exitosamente")
+                return True
+
+        # Si no se pudo liberar, esperar un poco más antes del siguiente intento
+        if attempt < max_attempts - 1:
+            print(f"🔄 Esperando antes del siguiente intento...")
+            import time
+            time.sleep(3)
+
+    print(f"❌ No se pudo liberar el puerto {port} después de {max_attempts} intentos")
+    return False
 
 app = Flask(__name__)
 CORS(app)  # Habilitar CORS para desarrollo
 
 # Inicializar managers
-log_manager = LogManager()
 config_manager = ConfigManager()
+directory_manager = DirectoryManager(config_manager.get_config().get('logDir', 'logs'))
+log_manager = LogManager(base_dir=config_manager.get_config().get('logDir', 'logs'), directory_manager=directory_manager)
+
+# Registrar el blueprint de directorios
+app.register_blueprint(directory_routes)
 file_watcher = FileWatcher()
 
 def on_external_log(file_path: str):
     """Callback para cuando hay cambios en un archivo externo"""
-    if not file_watcher.is_active() or not log_manager.is_active():
+    if not file_watcher.is_active or not log_manager.is_active:
         return
-    
+
     new_lines = file_watcher.get_new_content(file_path)
     for line in new_lines:
-        log_manager.write_log({  # type: ignore
+        log_manager.write_log({
             "level": "external",
             "message": line,
             "url": f"file://{file_path}",
@@ -154,7 +174,7 @@ def on_external_log(file_path: str):
 def log():
     try:
         log_data = request.json
-        if not log_manager.is_active():
+        if not log_manager.is_active:
             return jsonify({
                 "status": "monitoring_disabled",
                 "message": "El monitoreo está desactivado"
@@ -167,7 +187,7 @@ def log():
                 "message": "No se recibieron datos de log"
             }), 400
 
-        if log_manager.write_log(log_data):  # type: ignore
+        if log_manager.write_log(log_data):
             return jsonify({
                 "status": "success",
                 "message": "Log recibido correctamente"
@@ -187,7 +207,7 @@ def log():
 def get_logs():
     try:
         limit = request.args.get('limit', default=10, type=int)
-        logs = log_manager.get_recent_logs(limit)  # type: ignore
+        logs = log_manager.get_recent_logs(limit)
         return jsonify({
             "status": "success",
             "data": logs
@@ -240,17 +260,34 @@ def stop_monitoring():
             "message": str(e)
         }), 500
 
+@app.route('/monitoring/status', methods=['GET'])
+def get_monitoring_status():
+    """Obtener el estado actual del monitoreo"""
+    try:
+        is_active = log_manager.is_active
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'isActive': is_active
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Error al obtener estado: {str(e)}'
+        }), 500
+
 @app.route('/config', methods=['GET'])
 def get_config():
     try:
         config = config_manager.get_config()
-        file_info = log_manager.get_log_file_info()  # type: ignore
+        file_info = log_manager.get_log_file_info()
         return jsonify({
             "status": "success",
             "data": {
                 **config,
                 "fileInfo": file_info,
-                "isActive": log_manager.is_active()
+                "isActive": log_manager.is_active
             }
         })
     except Exception as e:
@@ -263,15 +300,43 @@ def get_config():
 def update_config():
     try:
         new_config = request.json
-        
+
         # Validar que new_config no sea None
         if new_config is None:
             return jsonify({
                 "status": "error",
                 "message": "No se recibieron datos de configuración"
             }), 400
-            
-        if config_manager.update_config(new_config):  # type: ignore
+
+        # Verificar si se está intentando cambiar el directorio de logs
+        if 'customLogPath' in new_config:
+            if log_manager.is_active:
+                return jsonify({
+                    "status": "error",
+                    "message": "No se puede cambiar el directorio de logs mientras el servicio está activo"
+                }), 400
+
+            custom_path = new_config['customLogPath']
+            if custom_path:
+                try:
+                    # Crear un token para el nuevo directorio
+                    token = directory_manager.create_token(custom_path)
+                    # Configurar el LogManager para usar el nuevo directorio
+                    if not log_manager.set_log_directory_token(token):
+                        return jsonify({
+                            "status": "error",
+                            "message": "No se pudo configurar el directorio de logs"
+                        }), 500
+                except ValueError as e:
+                    return jsonify({
+                        "status": "error",
+                        "message": f"Error configurando directorio: {str(e)}"
+                    }), 400
+            else:
+                # Si no hay ruta personalizada, volver al directorio base
+                log_manager.set_log_directory_token(None)
+
+        if config_manager.update_config(new_config):
             # Actualizar configuración del log manager
             log_manager.set_max_file_size(new_config.get('maxFileSize', 50))
             return jsonify({

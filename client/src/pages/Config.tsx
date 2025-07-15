@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { configApi, type ConfigData } from '@/lib/api';
+import { configApi, monitoringApi } from '@/lib/api';
 import { Separator } from '@/components/ui/separator';
 
 interface ConfigFormData {
@@ -12,6 +12,7 @@ interface ConfigFormData {
   urlFilters: string;     // Como string para el input, se convertirá a array
   port: number;
   logDir: string;
+  customLogPath: string;  // Ruta personalizada seleccionada por el usuario
   monitoringEnabled: boolean;
   monitoringInterval: number;
 }
@@ -23,6 +24,7 @@ export default function Config() {
     urlFilters: '',           // Como string, se convertirá a array
     port: 7845,
     logDir: 'logs',
+    customLogPath: '',        // Ruta personalizada vacía por defecto
     monitoringEnabled: false,
     monitoringInterval: 1000
   });
@@ -30,6 +32,39 @@ export default function Config() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [serverInfo, setServerInfo] = useState<{ isActive: boolean, fileInfo?: any } | null>(null);
+  const [monitoringActive, setMonitoringActive] = useState(false);
+
+  // Función para manejar la selección de directorio
+  const handleDirectorySelect = async () => {
+    try {
+      // Usar la API de File System Access (moderna)
+      if ('showDirectoryPicker' in window) {
+        const dirHandle = await (window as any).showDirectoryPicker();
+        setFormData(prev => ({ ...prev, customLogPath: dirHandle.name }));
+        setMessage({ type: 'success', text: `Directorio seleccionado: ${dirHandle.name}` });
+      } else {
+        // Fallback para navegadores que no soportan File System Access API
+        setMessage({ type: 'error', text: 'Tu navegador no soporta selección de directorios. Usa el campo de texto.' });
+      }
+    } catch (error) {
+      if ((error as any).name !== 'AbortError') {
+        console.error('Error selecting directory:', error);
+        setMessage({ type: 'error', text: 'Error al seleccionar directorio' });
+      }
+    }
+  };
+
+  // Función para obtener el estado del monitoreo
+  const checkMonitoringStatus = async () => {
+    try {
+      const statusResponse = await monitoringApi.getStatus();
+      if (statusResponse.status === 'success' && statusResponse.data) {
+        setMonitoringActive(statusResponse.data.isActive);
+      }
+    } catch (error) {
+      console.error('Error getting monitoring status:', error);
+    }
+  };
 
   useEffect(() => {
     const loadConfig = async () => {
@@ -45,6 +80,7 @@ export default function Config() {
             urlFilters: config.urlFilters.join(', '), // Convertir array a string
             port: config.port,
             logDir: config.logDir,
+            customLogPath: '',        // Mantener vacío, se llenará cuando el usuario seleccione
             monitoringEnabled: config.monitoring.enabled,
             monitoringInterval: config.monitoring.intervalMs
           });
@@ -53,6 +89,9 @@ export default function Config() {
             isActive: config.isActive || false,
             fileInfo: config.fileInfo
           });
+
+          // Actualizar estado del monitoreo
+          setMonitoringActive(config.isActive || false);
         }
       } catch (error) {
         console.error('Error al cargar la configuración:', error);
@@ -63,6 +102,15 @@ export default function Config() {
     };
 
     loadConfig();
+
+    // Verificar estado del monitoreo
+    checkMonitoringStatus();
+
+    // Configurar un intervalo para verificar el estado del monitoreo periódicamente
+    const intervalId = setInterval(checkMonitoringStatus, 5000);
+
+    // Limpiar intervalo al desmontar
+    return () => clearInterval(intervalId);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -78,7 +126,7 @@ export default function Config() {
         maxLogs: formData.maxLogs,
         urlFilters: formData.urlFilters.split(',').map(f => f.trim()).filter(f => f.length > 0),
         port: formData.port,
-        logDir: formData.logDir,
+        logDir: formData.customLogPath || formData.logDir, // Usar directorio personalizado si está disponible
         monitoring: {
           enabled: formData.monitoringEnabled,
           intervalMs: formData.monitoringInterval
@@ -134,6 +182,28 @@ export default function Config() {
         </Card>
       )}
 
+      {/* Estado del servicio */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>Estado del Servicio</span>
+            <div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${
+                monitoringActive ? 'bg-green-500' : 'bg-red-500'
+              }`}></div>
+              <span className="text-sm text-gray-600">
+                {monitoringActive ? 'Monitoreo Activo' : 'Monitoreo Detenido'}
+              </span>
+            </div>
+          </CardTitle>
+          <CardDescription>
+            {monitoringActive
+              ? "El servicio de monitoreo está activo. Algunas configuraciones no se pueden cambiar."
+              : "El servicio de monitoreo está detenido. Puedes cambiar todas las configuraciones."}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
       {/* Formulario de configuración */}
       <form onSubmit={handleSubmit}>
         <Card>
@@ -149,13 +219,43 @@ export default function Config() {
               <h3 className="text-lg font-medium">Archivos y Logs</h3>
 
               <div className="space-y-2">
-                <Label htmlFor="logDir">Directorio de logs</Label>
+                <Label htmlFor="logDir">Directorio de logs (por defecto)</Label>
                 <Input
                   id="logDir"
                   value={formData.logDir}
                   onChange={(e) => setFormData(prev => ({ ...prev, logDir: e.target.value }))}
                   placeholder="logs"
                 />
+                <p className="text-sm text-gray-500">
+                  Directorio por defecto donde se guardarán los logs
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="customLogPath">Directorio personalizado para esta sesión</Label>
+                <div className="flex space-x-2">
+                  <Input
+                    id="customLogPath"
+                    value={formData.customLogPath}
+                    onChange={(e) => setFormData(prev => ({ ...prev, customLogPath: e.target.value }))}
+                    placeholder="Selecciona un directorio o escribe la ruta..."
+                    className="flex-1"
+                    disabled={monitoringActive}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleDirectorySelect}
+                    disabled={monitoringActive}
+                  >
+                    Examinar
+                  </Button>
+                </div>
+                <p className="text-sm text-gray-500">
+                  {monitoringActive
+                    ? "Debes detener el servicio de monitoreo para cambiar el directorio de logs"
+                    : "Selecciona un directorio específico donde guardar los logs de esta sesión"}
+                </p>
               </div>
 
               <div className="space-y-2">

@@ -97,7 +97,20 @@ export default function Monitor() {
 
   useInterval(fetchLogs, monitoringState === "running" ? 1000 : null);
 
+  // Obtener estado inicial del monitoreo
   useEffect(() => {
+    const getInitialStatus = async () => {
+      try {
+        const statusResponse = await monitoringApi.getStatus();
+        if (statusResponse.status === 'success' && statusResponse.data) {
+          setMonitoringState(statusResponse.data.isActive ? 'running' : 'stopped');
+        }
+      } catch (error) {
+        console.error('Error getting initial monitoring status:', error);
+      }
+    };
+
+    getInitialStatus();
     fetchLogs();
   }, [logLimit]);
 

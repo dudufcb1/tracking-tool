@@ -1,0 +1,1 @@
+[2025-07-15 02:42:40] BUG_SOLVED: Corregidos todos los errores de tipado en Python: eliminados comentarios # type: ignore, convertido is_active() de método a propiedad en LogManager y FileWatcher para consistencia, verificado con mypy que no hay errores de tipos

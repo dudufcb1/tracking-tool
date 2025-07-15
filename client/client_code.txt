@@ -1,0 +1,2516 @@
+# Project: client
+# Generated on: 2025-07-15 01:04:18
+
+
+
+client_code.txt
+===============
+
+
+
+
+components.json
+===============
+
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/styles/index.css",
+    "baseColor": "slate",
+    "cssVariables": true
+  },
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui"
+  }
+}
+
+
+
+devpipe.js
+==========
+
+/**
+ * DevPipe Client - Framework de Observabilidad para Desarrollo Local
+ * 
+ * Este script captura console.log, errores y otros eventos del navegador
+ * y los envía a un servidor local para monitoreo centralizado.
+ * 
+ * Solo se activa en entornos de desarrollo.
+ */
+
+(function() {
+    'use strict';
+
+    // Configuración
+    const CONFIG = {
+        serverUrl: getServerUrl(),
+        endpoint: '/log',
+        maxRetries: 3,
+        retryDelay: 1000,
+        batchSize: 10,
+        batchTimeout: 2000,
+        enabledInProduction: false
+    };
+
+    // Verificar si debe activarse
+    if (!shouldActivate()) {
+        console.log('[DevPipe] No activado - entorno de producción detectado');
+        return;
+    }
+
+    class DevPipeClient {
+        constructor() {
+            this.originalConsole = {};
+            this.logQueue = [];
+            this.batchTimer = null;
+            this.isActive = true;
+            
+            this.init();
+        }
+
+        init() {
+            console.log('[DevPipe] Inicializando cliente de observabilidad...');
+            
+            this.backupOriginalMethods();
+            this.interceptConsole();
+            this.interceptErrors();
+            this.interceptUnhandledRejections();
+            this.startBatchProcessor();
+            
+            console.log('[DevPipe] Cliente inicializado correctamente');
+        }
+
+        backupOriginalMethods() {
+            // Guardar referencias a los métodos originales
+            this.originalConsole = {
+                log: console.log.bind(console),
+                error: console.error.bind(console),
+                warn: console.warn.bind(console),
+                info: console.info.bind(console),
+                debug: console.debug.bind(console)
+            };
+        }
+
+        interceptConsole() {
+            const self = this;
+            
+            // Interceptar console.log
+            console.log = function(...args) {
+                self.originalConsole.log.apply(console, args);
+                self.captureLog('log', args);
+            };
+
+            // Interceptar console.error
+            console.error = function(...args) {
+                self.originalConsole.error.apply(console, args);
+                self.captureLog('error', args);
+            };
+
+            // Interceptar console.warn
+            console.warn = function(...args) {
+                self.originalConsole.warn.apply(console, args);
+                self.captureLog('warn', args);
+            };
+
+            // Interceptar console.info
+            console.info = function(...args) {
+                self.originalConsole.info.apply(console, args);
+                self.captureLog('info', args);
+            };
+
+            // Interceptar console.debug
+            console.debug = function(...args) {
+                self.originalConsole.debug.apply(console, args);
+                self.captureLog('debug', args);
+            };
+        }
+
+        interceptErrors() {
+            const self = this;
+            
+            // Interceptar errores globales
+            window.addEventListener('error', function(event) {
+                self.captureError({
+                    message: event.message,
+                    filename: event.filename,
+                    lineno: event.lineno,
+                    colno: event.colno,
+                    error: event.error,
+                    stack: event.error ? event.error.stack : null
+                });
+            });
+        }
+
+        interceptUnhandledRejections() {
+            const self = this;
+            
+            // Interceptar promesas rechazadas no manejadas
+            window.addEventListener('unhandledrejection', function(event) {
+                self.captureError({
+                    message: 'Unhandled Promise Rejection: ' + (event.reason || 'Unknown reason'),
+                    stack: event.reason && event.reason.stack ? event.reason.stack : null,
+                    type: 'unhandledrejection'
+                });
+            });
+        }
+
+        captureLog(level, args) {
+            if (!this.isActive) return;
+
+            const message = args.map(arg => {
+                if (typeof arg === 'object') {
+                    try {
+                        return JSON.stringify(arg, null, 2);
+                    } catch (e) {
+                        return '[Object]';
+                    }
+                }
+                return String(arg);
+            }).join(' ');
+
+            const logEntry = {
+                level: level,
+                message: message,
+                url: window.location.href,
+                timestamp: new Date().toISOString(),
+                user_agent: navigator.userAgent,
+                additional_data: {
+                    args_count: args.length,
+                    page_title: document.title
+                }
+            };
+
+            this.queueLog(logEntry);
+        }
+
+        captureError(errorInfo) {
+            if (!this.isActive) return;
+
+            const logEntry = {
+                level: 'error',
+                message: errorInfo.message || 'Unknown error',
+                url: window.location.href,
+                timestamp: new Date().toISOString(),
+                user_agent: navigator.userAgent,
+                stack_trace: errorInfo.stack,
+                additional_data: {
+                    filename: errorInfo.filename,
+                    lineno: errorInfo.lineno,
+                    colno: errorInfo.colno,
+                    type: errorInfo.type || 'javascript_error',
+                    page_title: document.title
+                }
+            };
+
+            this.queueLog(logEntry);
+        }
+
+        queueLog(logEntry) {
+            this.logQueue.push(logEntry);
+            
+            // Si la cola está llena, enviar inmediatamente
+            if (this.logQueue.length >= CONFIG.batchSize) {
+                this.flushQueue();
+            }
+        }
+
+        startBatchProcessor() {
+            // Procesar cola cada cierto tiempo
+            setInterval(() => {
+                if (this.logQueue.length > 0) {
+                    this.flushQueue();
+                }
+            }, CONFIG.batchTimeout);
+        }
+
+        flushQueue() {
+            if (this.logQueue.length === 0) return;
+
+            const logsToSend = [...this.logQueue];
+            this.logQueue = [];
+
+            // Enviar logs uno por uno (el servidor espera logs individuales)
+            logsToSend.forEach(log => this.sendLog(log));
+        }
+
+        async sendLog(logEntry, retryCount = 0) {
+            try {
+                const response = await fetch(CONFIG.serverUrl + CONFIG.endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(logEntry)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                
+                // Si el monitoreo está desactivado, pausar el cliente
+                if (result.status === 'monitoring_disabled') {
+                    this.originalConsole.warn('[DevPipe] Monitoreo desactivado en el servidor');
+                    return;
+                }
+
+                // Si fue filtrado, no es un error
+                if (result.status === 'filtered_out') {
+                    return;
+                }
+
+            } catch (error) {
+                // Reintentar si no se alcanzó el máximo de reintentos
+                if (retryCount < CONFIG.maxRetries) {
+                    setTimeout(() => {
+                        this.sendLog(logEntry, retryCount + 1);
+                    }, CONFIG.retryDelay * Math.pow(2, retryCount)); // Backoff exponencial
+                } else {
+                    // Solo mostrar error en consola si es el último intento
+                    this.originalConsole.error('[DevPipe] Error enviando log después de', CONFIG.maxRetries, 'intentos:', error.message);
+                }
+            }
+        }
+
+        // Método para desactivar temporalmente
+        pause() {
+            this.isActive = false;
+            this.originalConsole.log('[DevPipe] Cliente pausado');
+        }
+
+        // Método para reactivar
+        resume() {
+            this.isActive = true;
+            this.originalConsole.log('[DevPipe] Cliente reanudado');
+        }
+
+        // Método para restaurar console original
+        restore() {
+            Object.keys(this.originalConsole).forEach(method => {
+                console[method] = this.originalConsole[method];
+            });
+            this.originalConsole.log('[DevPipe] Console original restaurado');
+        }
+    }
+
+    // Función para obtener URL del servidor
+    function getServerUrl() {
+        // Verificar si hay un puerto personalizado en localStorage
+        const customPort = localStorage.getItem('devpipe_port');
+        const hostname = window.location.hostname || 'localhost';
+
+        if (customPort) {
+            console.log(`[DevPipe] Usando puerto personalizado desde localStorage: ${customPort}`);
+            return `http://${hostname}:${customPort}`;
+        }
+
+        // Si estamos en el mismo host que DevPipe, usar el puerto por defecto
+        if (hostname === 'localhost' || hostname === '127.0.0.1') {
+            return `http://${hostname}:7845`;
+        }
+
+        // Por defecto, usar localhost:7845
+        return 'http://localhost:7845';
+    }
+
+    // Función para configurar puerto personalizado
+    function setCustomPort(port) {
+        if (port && !isNaN(port) && port > 0 && port <= 65535) {
+            localStorage.setItem('devpipe_port', port.toString());
+            console.log(`[DevPipe] Puerto personalizado configurado: ${port}`);
+            return true;
+        } else {
+            console.error('[DevPipe] Puerto inválido:', port);
+            return false;
+        }
+    }
+
+    // Función para limpiar puerto personalizado
+    function clearCustomPort() {
+        localStorage.removeItem('devpipe_port');
+        console.log('[DevPipe] Puerto personalizado eliminado, usando puerto por defecto');
+    }
+
+    // Función para obtener puerto actual
+    function getCurrentPort() {
+        const customPort = localStorage.getItem('devpipe_port');
+        return customPort ? parseInt(customPort) : 7845;
+    }
+
+    // Función para determinar si debe activarse
+    function shouldActivate() {
+        // Verificar variables de entorno comunes
+        if (typeof process !== 'undefined' && process.env) {
+            if (process.env.NODE_ENV === 'production' && !CONFIG.enabledInProduction) {
+                return false;
+            }
+            if (process.env.NODE_ENV === 'development') {
+                return true;
+            }
+        }
+
+        // Verificar parámetros de URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('debug') === 'true' || urlParams.get('devpipe') === 'true') {
+            return true;
+        }
+
+        // Verificar si es localhost o desarrollo
+        const hostname = window.location.hostname;
+        if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.local')) {
+            return true;
+        }
+
+        // Verificar puerto de desarrollo común
+        const port = window.location.port;
+        const devPorts = ['3000', '3001', '7845', '8000', '8080', '8888', '9000'];
+        if (devPorts.includes(port)) {
+            return true;
+        }
+
+        // Por defecto, no activar en producción
+        return false;
+    }
+
+    // Inicializar cliente
+    const devPipeClient = new DevPipeClient();
+
+    // Exponer globalmente para debugging
+    window.DevPipe = {
+        client: devPipeClient,
+        pause: () => devPipeClient.pause(),
+        resume: () => devPipeClient.resume(),
+        restore: () => devPipeClient.restore(),
+        config: CONFIG,
+        // Funciones para manejo de puerto personalizado
+        setPort: setCustomPort,
+        clearPort: clearCustomPort,
+        getCurrentPort: getCurrentPort,
+        getServerUrl: getServerUrl
+    };
+
+    // Log de inicialización
+    console.log('[DevPipe] Cliente cargado y listo para capturar logs');
+
+})();
+
+
+
+eslint.config.js
+================
+
+import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+import tseslint from 'typescript-eslint'
+import { globalIgnores } from 'eslint/config'
+
+export default tseslint.config([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      js.configs.recommended,
+      tseslint.configs.recommended,
+      reactHooks.configs['recommended-latest'],
+      reactRefresh.configs.vite,
+    ],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+    },
+  },
+])
+
+
+
+index.html
+==========
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + React + TS</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+
+
+package.json
+============
+
+{
+  "name": "client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.14",
+    "@radix-ui/react-dropdown-menu": "^2.1.15",
+    "@radix-ui/react-label": "^2.1.7",
+    "@radix-ui/react-navigation-menu": "^1.2.13",
+    "@radix-ui/react-select": "^2.2.5",
+    "@radix-ui/react-separator": "^1.1.7",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@radix-ui/react-tabs": "^1.1.12",
+    "@tanstack/react-query": "^5.83.0",
+    "@types/react-router-dom": "^5.3.3",
+    "axios": "^1.10.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.525.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.3",
+    "tailwind-merge": "^3.3.1",
+    "tw-animate-css": "^1.3.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.1",
+    "@tailwindcss/postcss": "^4.1.11",
+    "@tailwindcss/vite": "^4.1.11",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "^4.6.0",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.30.1",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.3.0",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "typescript": "~5.8.3",
+    "typescript-eslint": "^8.35.1",
+    "vite": "^7.0.4"
+  }
+}
+
+
+
+README.md
+=========
+
+# React + TypeScript + Vite
+
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+
+Currently, two official plugins are available:
+
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+
+## Expanding the ESLint configuration
+
+If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+
+```js
+export default tseslint.config([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+
+      // Remove tseslint.configs.recommended and replace with this
+      ...tseslint.configs.recommendedTypeChecked,
+      // Alternatively, use this for stricter rules
+      ...tseslint.configs.strictTypeChecked,
+      // Optionally, add this for stylistic rules
+      ...tseslint.configs.stylisticTypeChecked,
+
+      // Other configs...
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
+```
+
+You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+
+```js
+// eslint.config.js
+import reactX from 'eslint-plugin-react-x'
+import reactDom from 'eslint-plugin-react-dom'
+
+export default tseslint.config([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+      // Enable lint rules for React
+      reactX.configs['recommended-typescript'],
+      // Enable lint rules for React DOM
+      reactDom.configs.recommended,
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
+```
+
+
+
+tsconfig.app.json
+=================
+
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Path Aliases */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src"]
+}
+
+
+
+tsconfig.json
+=============
+
+{
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.app.json" },
+    { "path": "./tsconfig.node.json" }
+  ]
+}
+
+
+
+tsconfig.node.json
+==================
+
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["vite.config.ts"]
+}
+
+
+
+vite.config.ts
+==============
+
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [
+    tailwindcss(),
+    react()
+  ],
+  resolve: {
+    alias: {
+      '@': '/src',
+    },
+  },
+})
+
+
+
+@/components/ui/separator.tsx
+=============================
+
+import * as React from "react"
+import * as SeparatorPrimitive from "@radix-ui/react-separator"
+
+import { cn } from "@/lib/utils"
+
+function Separator({
+  className,
+  orientation = "horizontal",
+  decorative = true,
+  ...props
+}: React.ComponentProps<typeof SeparatorPrimitive.Root>) {
+  return (
+    <SeparatorPrimitive.Root
+      data-slot="separator"
+      decorative={decorative}
+      orientation={orientation}
+      className={cn(
+        "bg-border shrink-0 data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full data-[orientation=vertical]:h-full data-[orientation=vertical]:w-px",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { Separator }
+
+
+
+src/App.tsx
+===========
+
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import MainLayout from './components/Layout/MainLayout';
+import Monitor from './pages/Monitor';
+import Config from './pages/Config';
+
+const queryClient = new QueryClient();
+
+function App() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Router>
+        <MainLayout>
+          <Routes>
+            <Route path="/" element={<Monitor />} />
+            <Route path="/config" element={<Config />} />
+          </Routes>
+        </MainLayout>
+      </Router>
+    </QueryClientProvider>
+  )
+}
+
+export default App
+
+
+
+src/main.tsx
+============
+
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './styles/index.css'
+import App from './App.tsx'
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+)
+
+
+
+src/vite-env.d.ts
+=================
+
+/// <reference types="vite/client" />
+
+
+
+src/components/Layout/MainLayout.tsx
+====================================
+
+import { useState } from 'react';
+import type { ReactNode } from 'react';
+import Navbar from './Navbar';
+import Sidebar from './Sidebar';
+
+const drawerWidth = 240;
+
+interface MainLayoutProps {
+  children: ReactNode;
+}
+
+export default function MainLayout({ children }: MainLayoutProps) {
+  const [mode, setMode] = useState<'light' | 'dark'>('light');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const handleDrawerToggle = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
+  const toggleColorMode = () => {
+    setMode((prevMode) => (prevMode === 'light' ? 'dark' : 'light'));
+  };
+
+  return (
+    <div className={`min-h-screen bg-gray-50 ${mode === 'dark' ? 'dark' : ''}`}>
+      {/* Navbar fijo en la parte superior */}
+      <Navbar
+        open={sidebarOpen}
+        drawerWidth={drawerWidth}
+        onDrawerToggle={handleDrawerToggle}
+        onThemeToggle={toggleColorMode}
+        mode={mode}
+      />
+
+      {/* Sidebar */}
+      <Sidebar
+        open={sidebarOpen}
+        drawerWidth={drawerWidth}
+        onDrawerToggle={handleDrawerToggle}
+      />
+
+      {/* Contenido principal con margen apropiado */}
+      <main className="pt-16 md:ml-60 transition-all duration-300 min-h-screen">
+        <div className="p-6">
+          {children}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+
+
+src/components/Layout/Navbar.tsx
+================================
+
+import { Menu, Sun, Moon } from "lucide-react"
+import { Button } from "@/components/ui/button"
+
+interface NavbarProps {
+  open: boolean;
+  drawerWidth: number;
+  onDrawerToggle: () => void;
+  onThemeToggle?: () => void;
+  mode?: 'light' | 'dark';
+}
+
+export default function Navbar({
+  onDrawerToggle,
+  onThemeToggle,
+  mode = 'light',
+}: NavbarProps) {
+  return (
+    <nav className="fixed top-0 left-0 md:left-60 right-0 z-40 bg-white border-b border-gray-200 h-16">
+      <div className="container flex justify-between h-16 items-center px-4">
+        <div>
+          <Button
+            variant="ghost"
+            className="md:hidden"
+            onClick={onDrawerToggle}
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+        </div>
+
+        <div className="flex-1 text-center md:text-left">
+          <h1 className="text-lg font-semibold text-gray-800">DevPipe Monitor</h1>
+        </div>
+
+        <div>
+          {onThemeToggle && (
+            <Button
+              variant="ghost"
+              className="w-9 px-0"
+              onClick={onThemeToggle}
+            >
+              {mode === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </Button>
+          )}
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+
+
+src/components/Layout/Sidebar.tsx
+=================================
+
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { MonitorIcon, SettingsIcon } from 'lucide-react';
+
+interface SidebarProps {
+  open: boolean;
+  drawerWidth: number;
+  onDrawerToggle: () => void;
+}
+
+export default function Sidebar({
+  open,
+  drawerWidth,
+  onDrawerToggle,
+}: SidebarProps) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const menuItems = [
+    { text: 'Monitor', icon: MonitorIcon, path: '/' },
+    { text: 'Configuración', icon: SettingsIcon, path: '/config' },
+  ];
+
+  const sidebarContent = (
+    <div className="p-4 space-y-2">
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold text-gray-800">DevPipe</h2>
+        <p className="text-sm text-gray-600">Monitor de Logs</p>
+      </div>
+
+      <nav className="space-y-1">
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path;
+
+          return (
+            <Button
+              key={item.text}
+              variant={isActive ? "default" : "ghost"}
+              className="w-full justify-start"
+              onClick={() => {
+                navigate(item.path);
+                onDrawerToggle();
+              }}
+            >
+              <Icon className="h-4 w-4 mr-2" />
+              {item.text}
+            </Button>
+          );
+        })}
+      </nav>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Mobile sidebar overlay */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          onClick={onDrawerToggle}
+        />
+      )}
+
+      {/* Mobile sidebar */}
+      <div className={`
+        fixed top-0 left-0 h-full bg-white z-50 transform transition-transform duration-300 ease-in-out md:hidden
+        ${open ? 'translate-x-0' : '-translate-x-full'}
+      `} style={{ width: drawerWidth }}>
+        <Card className="h-full rounded-none border-r">
+          <CardContent className="p-0">
+            {sidebarContent}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Desktop sidebar - fijo en la izquierda */}
+      <div
+        className="hidden md:block fixed top-0 left-0 h-full z-30 bg-white border-r border-gray-200"
+        style={{ width: drawerWidth }}
+      >
+        <div className="h-full overflow-y-auto">
+          {sidebarContent}
+        </div>
+      </div>
+    </>
+  );
+}
+
+
+
+src/components/ui/button.tsx
+============================
+
+import { cva, type VariantProps } from "class-variance-authority"
+import * as React from "react"
+import { Slot } from "@radix-ui/react-slot"
+import { cn } from "@/lib/utils"
+
+const buttonVariants = cva(
+  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 dark:ring-offset-slate-950 dark:focus-visible:ring-slate-300",
+  {
+    variants: {
+      variant: {
+        default: "bg-slate-900 text-slate-50 hover:bg-slate-900/90 dark:bg-slate-50 dark:text-slate-900 dark:hover:bg-slate-50/90",
+        destructive:
+          "bg-red-500 text-slate-50 hover:bg-red-500/90 dark:bg-red-900 dark:text-slate-50 dark:hover:bg-red-900/90",
+        outline:
+          "border border-slate-200 bg-white hover:bg-slate-100 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-800 dark:hover:text-slate-50",
+        secondary:
+          "bg-slate-100 text-slate-900 hover:bg-slate-100/80 dark:bg-slate-800 dark:text-slate-50 dark:hover:bg-slate-800/80",
+        ghost: "hover:bg-slate-100 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-slate-50",
+        link: "text-slate-900 underline-offset-4 hover:underline dark:text-slate-50",
+      },
+      size: {
+        default: "h-10 px-4 py-2",
+        sm: "h-9 rounded-md px-3",
+        lg: "h-11 rounded-md px-8",
+        icon: "h-10 w-10",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+)
+
+export interface ButtonProps
+  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+    VariantProps<typeof buttonVariants> {
+  asChild?: boolean
+}
+
+export function Button({
+  className,
+  variant,
+  size,
+  asChild = false,
+  ...props
+}: ButtonProps) {
+  const Comp = asChild ? Slot : "button"
+  return (
+    <Comp
+      data-slot="button"
+      className={cn(buttonVariants({ variant, size, className }))}
+      {...props}
+    />
+  )
+}
+
+
+
+src/components/ui/card.tsx
+==========================
+
+import * as React from "react"
+import { cn } from "@/lib/utils"
+
+const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div
+      ref={ref}
+      data-slot="card"
+      className={cn(
+        "rounded-lg border bg-card text-card-foreground shadow-sm",
+        className
+      )}
+      {...props}
+    />
+  )
+)
+Card.displayName = "Card"
+
+const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div
+      ref={ref}
+      data-slot="card-header"
+      className={cn("flex flex-col space-y-1.5 p-6", className)}
+      {...props}
+    />
+  )
+)
+CardHeader.displayName = "CardHeader"
+
+const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(
+  ({ className, ...props }, ref) => (
+    <h3
+      ref={ref}
+      data-slot="card-title"
+      className={cn(
+        "text-2xl font-semibold leading-none tracking-tight",
+        className
+      )}
+      {...props}
+    />
+  )
+)
+CardTitle.displayName = "CardTitle"
+
+const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(
+  ({ className, ...props }, ref) => (
+    <p
+      ref={ref}
+      data-slot="card-description"
+      className={cn("text-sm text-muted-foreground", className)}
+      {...props}
+    />
+  )
+)
+CardDescription.displayName = "CardDescription"
+
+const CardContent = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div ref={ref} data-slot="card-content" className={cn("p-6 pt-0", className)} {...props} />
+  )
+)
+CardContent.displayName = "CardContent"
+
+const CardFooter = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  ({ className, ...props }, ref) => (
+    <div
+      ref={ref}
+      data-slot="card-footer"
+      className={cn("flex items-center p-6 pt-0", className)}
+      {...props}
+    />
+  )
+)
+CardFooter.displayName = "CardFooter"
+
+export { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent }
+
+
+
+src/components/ui/dialog.tsx
+============================
+
+import * as React from "react"
+import * as DialogPrimitive from "@radix-ui/react-dialog"
+import { X } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+const Dialog = DialogPrimitive.Root
+
+const DialogTrigger = DialogPrimitive.Trigger
+
+const DialogClose = DialogPrimitive.Close
+
+const DialogPortal = DialogPrimitive.Portal
+
+const DialogOverlay = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Overlay>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Overlay
+    ref={ref}
+    data-slot="dialog-overlay"
+    className={cn(
+      "fixed inset-0 z-50 bg-black/80 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+      className
+    )}
+    {...props}
+  />
+))
+DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
+
+const DialogContent = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ className, children, ...props }, ref) => (
+  <DialogPortal>
+    <DialogOverlay />
+    <DialogPrimitive.Content
+      ref={ref}
+      data-slot="dialog-content"
+      className={cn(
+        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+        className
+      )}
+      {...props}
+    >
+      {children}
+      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+        <X className="h-4 w-4" />
+        <span className="sr-only">Close</span>
+      </DialogPrimitive.Close>
+    </DialogPrimitive.Content>
+  </DialogPortal>
+))
+DialogContent.displayName = DialogPrimitive.Content.displayName
+
+const DialogHeader = ({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div
+    data-slot="dialog-header"
+    className={cn(
+      "flex flex-col space-y-1.5 text-center sm:text-left",
+      className
+    )}
+    {...props}
+  />
+)
+DialogHeader.displayName = "DialogHeader"
+
+const DialogFooter = ({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) => (
+  <div
+    data-slot="dialog-footer"
+    className={cn(
+      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+      className
+    )}
+    {...props}
+  />
+)
+DialogFooter.displayName = "DialogFooter"
+
+const DialogTitle = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Title>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Title>
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Title
+    ref={ref}
+    data-slot="dialog-title"
+    className={cn("text-lg font-semibold leading-none tracking-tight", className)}
+    {...props}
+  />
+))
+DialogTitle.displayName = DialogPrimitive.Title.displayName
+
+const DialogDescription = React.forwardRef<
+  React.ElementRef<typeof DialogPrimitive.Description>,
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Description>
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Description
+    ref={ref}
+    data-slot="dialog-description"
+    className={cn("text-sm text-muted-foreground", className)}
+    {...props}
+  />
+))
+DialogDescription.displayName = DialogPrimitive.Description.displayName
+
+export {
+  Dialog,
+  DialogPortal,
+  DialogOverlay,
+  DialogTrigger,
+  DialogClose,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+}
+
+
+
+src/components/ui/dropdown-menu.tsx
+===================================
+
+import * as React from "react"
+import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu"
+import { Check, ChevronRight, Circle } from "lucide-react"
+import { cn } from "@/lib/utils"
+
+const DropdownMenu = DropdownMenuPrimitive.Root
+
+const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger
+
+const DropdownMenuGroup = DropdownMenuPrimitive.Group
+
+const DropdownMenuPortal = DropdownMenuPrimitive.Portal
+
+const DropdownMenuSub = DropdownMenuPrimitive.Sub
+
+const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup
+
+const DropdownMenuSubTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
+    inset?: boolean
+  }
+>(({ className, inset, children, ...props }, ref) => (
+  <DropdownMenuPrimitive.SubTrigger
+    ref={ref}
+    className={cn(
+      "flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent",
+      inset && "pl-8",
+      className
+    )}
+    {...props}
+  >
+    {children}
+    <ChevronRight className="ml-auto h-4 w-4" />
+  </DropdownMenuPrimitive.SubTrigger>
+))
+DropdownMenuSubTrigger.displayName =
+  DropdownMenuPrimitive.SubTrigger.displayName
+
+const DropdownMenuSubContent = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
+>(({ className, ...props }, ref) => (
+  <DropdownMenuPrimitive.SubContent
+    ref={ref}
+    className={cn(
+      "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+      className
+    )}
+    {...props}
+  />
+))
+DropdownMenuSubContent.displayName =
+  DropdownMenuPrimitive.SubContent.displayName
+
+const DropdownMenuContent = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
+>(({ className, sideOffset = 4, ...props }, ref) => (
+  <DropdownMenuPrimitive.Portal>
+    <DropdownMenuPrimitive.Content
+      ref={ref}
+      sideOffset={sideOffset}
+      className={cn(
+        "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        className
+      )}
+      {...props}
+    />
+  </DropdownMenuPrimitive.Portal>
+))
+DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName
+
+const DropdownMenuItem = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & {
+    inset?: boolean
+  }
+>(({ className, inset, ...props }, ref) => (
+  <DropdownMenuPrimitive.Item
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      inset && "pl-8",
+      className
+    )}
+    {...props}
+  />
+))
+DropdownMenuItem.displayName = DropdownMenuPrimitive.Item.displayName
+
+const DropdownMenuCheckboxItem = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.CheckboxItem>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>
+>(({ className, children, checked, ...props }, ref) => (
+  <DropdownMenuPrimitive.CheckboxItem
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className
+    )}
+    checked={checked}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <DropdownMenuPrimitive.ItemIndicator>
+        <Check className="h-4 w-4" />
+      </DropdownMenuPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </DropdownMenuPrimitive.CheckboxItem>
+))
+DropdownMenuCheckboxItem.displayName =
+  DropdownMenuPrimitive.CheckboxItem.displayName
+
+const DropdownMenuRadioItem = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
+>(({ className, children, ...props }, ref) => (
+  <DropdownMenuPrimitive.RadioItem
+    ref={ref}
+    className={cn(
+      "relative flex cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+      <DropdownMenuPrimitive.ItemIndicator>
+        <Circle className="h-2 w-2 fill-current" />
+      </DropdownMenuPrimitive.ItemIndicator>
+    </span>
+    {children}
+  </DropdownMenuPrimitive.RadioItem>
+))
+DropdownMenuRadioItem.displayName = DropdownMenuPrimitive.RadioItem.displayName
+
+const DropdownMenuLabel = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Label>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label> & {
+    inset?: boolean
+  }
+>(({ className, inset, ...props }, ref) => (
+  <DropdownMenuPrimitive.Label
+    ref={ref}
+    className={cn(
+      "px-2 py-1.5 text-sm font-semibold",
+      inset && "pl-8",
+      className
+    )}
+    {...props}
+  />
+))
+DropdownMenuLabel.displayName = DropdownMenuPrimitive.Label.displayName
+
+const DropdownMenuSeparator = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Separator>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Separator>
+>(({ className, ...props }, ref) => (
+  <DropdownMenuPrimitive.Separator
+    ref={ref}
+    className={cn("-mx-1 my-1 h-px bg-muted", className)}
+    {...props}
+  />
+))
+DropdownMenuSeparator.displayName = DropdownMenuPrimitive.Separator.displayName
+
+const DropdownMenuShortcut = ({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement>) => {
+  return (
+    <span
+      className={cn("ml-auto text-xs tracking-widest opacity-60", className)}
+      {...props}
+    />
+  )
+}
+DropdownMenuShortcut.displayName = "DropdownMenuShortcut"
+
+export {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuCheckboxItem,
+  DropdownMenuRadioItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuGroup,
+  DropdownMenuPortal,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuRadioGroup,
+}
+
+
+
+src/components/ui/input.tsx
+===========================
+
+import * as React from "react"
+import { cn } from "@/lib/utils"
+
+export interface InputProps
+  extends React.InputHTMLAttributes<HTMLInputElement> {}
+
+const Input = React.forwardRef<HTMLInputElement, InputProps>(
+  ({ className, type, ...props }, ref) => {
+    return (
+      <input
+        type={type}
+        className={cn(
+          "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
+          className
+        )}
+        ref={ref}
+        {...props}
+      />
+    )
+  }
+)
+Input.displayName = "Input"
+
+export { Input }
+
+
+
+src/components/ui/label.tsx
+===========================
+
+import * as React from "react"
+import * as LabelPrimitive from "@radix-ui/react-label"
+import { cn } from "@/lib/utils"
+
+const Label = React.forwardRef<
+  React.ElementRef<typeof LabelPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof LabelPrimitive.Root>
+>(({ className, ...props }, ref) => (
+  <LabelPrimitive.Root
+    ref={ref}
+    className={cn(
+      "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70",
+      className
+    )}
+    {...props}
+  />
+))
+Label.displayName = LabelPrimitive.Root.displayName
+
+export { Label }
+
+
+
+src/components/ui/navigation-menu.tsx
+=====================================
+
+import * as React from "react"
+import * as NavigationMenuPrimitive from "@radix-ui/react-navigation-menu"
+import { cn } from "@/lib/utils"
+
+const NavigationMenu = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Root>
+>(({ className, children, ...props }, ref) => (
+  <NavigationMenuPrimitive.Root
+    ref={ref}
+    className={cn(
+      "relative z-10 flex max-w-max flex-1 items-center justify-center",
+      className
+    )}
+    {...props}
+  >
+    {children}
+  </NavigationMenuPrimitive.Root>
+))
+NavigationMenu.displayName = NavigationMenuPrimitive.Root.displayName
+
+const NavigationMenuList = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.List>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.List>
+>(({ className, ...props }, ref) => (
+  <NavigationMenuPrimitive.List
+    ref={ref}
+    className={cn(
+      "group flex flex-1 list-none items-center justify-center space-x-1",
+      className
+    )}
+    {...props}
+  />
+))
+NavigationMenuList.displayName = NavigationMenuPrimitive.List.displayName
+
+const NavigationMenuItem = NavigationMenuPrimitive.Item
+
+const NavigationMenuContent = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Content>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Content>
+>(({ className, ...props }, ref) => (
+  <NavigationMenuPrimitive.Content
+    ref={ref}
+    className={cn(
+      "left-0 top-0 w-full data-[motion^=from-]:animate-in data-[motion^=to-]:animate-out data-[motion^=from-]:fade-in data-[motion^=to-]:fade-out data-[motion=from-end]:slide-in-from-right-52 data-[motion=from-start]:slide-in-from-left-52 data-[motion=to-end]:slide-out-to-right-52 data-[motion=to-start]:slide-out-to-left-52 md:absolute md:w-auto",
+      className
+    )}
+    {...props}
+  />
+))
+NavigationMenuContent.displayName = NavigationMenuPrimitive.Content.displayName
+
+const NavigationMenuLink = NavigationMenuPrimitive.Link
+
+const NavigationMenuViewport = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Viewport>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Viewport>
+>(({ className, ...props }, ref) => (
+  <div className={cn("absolute left-0 top-full flex justify-center")}>
+    <NavigationMenuPrimitive.Viewport
+      className={cn(
+        "origin-top-center relative mt-1.5 h-[var(--radix-navigation-menu-viewport-height)] w-full overflow-hidden rounded-md border bg-white shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-90 md:w-[var(--radix-navigation-menu-viewport-width)]",
+        className
+      )}
+      ref={ref}
+      {...props}
+    />
+  </div>
+))
+NavigationMenuViewport.displayName =
+  NavigationMenuPrimitive.Viewport.displayName
+
+const NavigationMenuTrigger = React.forwardRef<
+  React.ElementRef<typeof NavigationMenuPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof NavigationMenuPrimitive.Trigger>
+>(({ className, children, ...props }, ref) => (
+  <NavigationMenuPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      "group inline-flex h-10 w-max items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-100 hover:text-slate-900 focus:bg-slate-100 focus:text-slate-900 focus:outline-none disabled:pointer-events-none disabled:opacity-50 data-[active]:bg-slate-100/50 data-[state=open]:bg-slate-100/50 dark:bg-slate-950 dark:hover:bg-slate-800 dark:hover:text-slate-50 dark:focus:bg-slate-800 dark:focus:text-slate-50 dark:data-[active]:bg-slate-800/50 dark:data-[state=open]:bg-slate-800/50",
+      className
+    )}
+    {...props}
+  >
+    {children}
+  </NavigationMenuPrimitive.Trigger>
+))
+NavigationMenuTrigger.displayName = NavigationMenuPrimitive.Trigger.displayName
+
+export {
+  NavigationMenu,
+  NavigationMenuContent,
+  NavigationMenuItem,
+  NavigationMenuLink,
+  NavigationMenuList,
+  NavigationMenuTrigger,
+  NavigationMenuViewport,
+}
+
+
+
+src/components/ui/separator.tsx
+===============================
+
+import * as React from "react"
+import * as SeparatorPrimitive from "@radix-ui/react-separator"
+import { cn } from "@/lib/utils"
+
+const Separator = React.forwardRef<
+  React.ElementRef<typeof SeparatorPrimitive.Root>,
+  React.ComponentPropsWithoutRef<typeof SeparatorPrimitive.Root>
+>(({ className, orientation = "horizontal", decorative = true, ...props }, ref) => (
+  <SeparatorPrimitive.Root
+    ref={ref}
+    data-slot="separator"
+    decorative={decorative}
+    orientation={orientation}
+    className={cn(
+      "shrink-0 bg-border",
+      orientation === "horizontal" ? "h-[1px] w-full" : "h-full w-[1px]",
+      className
+    )}
+    {...props}
+  />
+))
+Separator.displayName = SeparatorPrimitive.Root.displayName
+
+export { Separator }
+
+
+
+src/lib/api.ts
+==============
+
+import axios from 'axios';
+
+// Función para obtener la URL del servidor (similar a devpipe.js)
+function getServerUrl(): string {
+  const customPort = localStorage.getItem('devpipe_port');
+  const hostname = window.location.hostname || 'localhost';
+
+  if (customPort) {
+    return `http://${hostname}:${customPort}`;
+  }
+
+  return `http://${hostname}:7846`;
+}
+
+const API_URL = getServerUrl();
+
+export const api = axios.create({
+  baseURL: API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  timeout: 5000,
+});
+
+// Interfaces que coinciden con el servidor real
+interface ServerResponse<T = any> {
+  status: 'success' | 'error' | 'monitoring_disabled' | 'filtered_out';
+  message?: string;
+  data?: T;
+}
+
+interface ConfigData {
+  maxFileSize: number;    // KB
+  maxLogs: number;
+  urlFilters: string[];
+  port: number;
+  logDir: string;
+  monitoring: {
+    enabled: boolean;
+    intervalMs: number;
+  };
+  fileInfo?: {
+    path: string;
+    size: number;
+    lastModified: string;
+  };
+  isActive?: boolean;
+}
+
+interface LogEntry {
+  level: string;
+  message: string;
+  url?: string;
+  timestamp: string;
+  user_agent?: string;
+  source?: string;
+}
+
+// API para configuración
+export const configApi = {
+  async getConfig(): Promise<ServerResponse<ConfigData>> {
+    try {
+      const response = await api.get<ServerResponse<ConfigData>>('/config');
+      return response.data;
+    } catch (error) {
+      console.error('Error getting config:', error);
+      throw error;
+    }
+  },
+
+  async updateConfig(config: Partial<ConfigData>): Promise<ServerResponse> {
+    try {
+      const response = await api.post<ServerResponse>('/config', config);
+      return response.data;
+    } catch (error) {
+      console.error('Error updating config:', error);
+      throw error;
+    }
+  },
+};
+
+// API para logs
+export const logsApi = {
+  async getRecentLogs(limit: number = 10): Promise<ServerResponse<LogEntry[]>> {
+    try {
+      const response = await api.get<ServerResponse<LogEntry[]>>(`/logs?limit=${limit}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error getting logs:', error);
+      throw error;
+    }
+  },
+
+  async clearLogs(): Promise<ServerResponse> {
+    try {
+      const response = await api.post<ServerResponse>('/logs/clear');
+      return response.data;
+    } catch (error) {
+      console.error('Error clearing logs:', error);
+      throw error;
+    }
+  },
+
+  async sendLog(logData: LogEntry): Promise<ServerResponse> {
+    try {
+      const response = await api.post<ServerResponse>('/log', logData);
+      return response.data;
+    } catch (error) {
+      console.error('Error sending log:', error);
+      throw error;
+    }
+  },
+};
+
+// API para monitoreo
+export const monitoringApi = {
+  async getStatus(): Promise<ServerResponse<{ isActive: boolean }>> {
+    try {
+      const response = await api.get<ServerResponse<{ isActive: boolean }>>('/monitoring/status');
+      return response.data;
+    } catch (error) {
+      console.error('Error getting monitoring status:', error);
+      throw error;
+    }
+  },
+
+  async startMonitoring(): Promise<ServerResponse> {
+    try {
+      const response = await api.post<ServerResponse>('/monitoring/start');
+      return response.data;
+    } catch (error) {
+      console.error('Error starting monitoring:', error);
+      throw error;
+    }
+  },
+
+  async stopMonitoring(): Promise<ServerResponse> {
+    try {
+      const response = await api.post<ServerResponse>('/monitoring/stop');
+      return response.data;
+    } catch (error) {
+      console.error('Error stopping monitoring:', error);
+      throw error;
+    }
+  },
+};
+
+// Función para actualizar la URL base si cambia el puerto
+export const updateApiBaseUrl = () => {
+  api.defaults.baseURL = getServerUrl();
+};
+
+// Interceptor para manejar errores comunes
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK') {
+      console.error('DevPipe server is not running. Please start the server with: python server/main.py');
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Exportar tipos para uso en componentes
+export type { ConfigData, LogEntry, ServerResponse };
+
+
+
+src/lib/hooks.ts
+================
+
+import { useEffect, useRef } from "react";
+
+export function useInterval(callback: () => void, delay: number | null) {
+  const savedCallback = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  useEffect(() => {
+    function tick() {
+      savedCallback.current?.();
+    }
+
+    if (delay !== null) {
+      const id = setInterval(tick, delay);
+      return () => clearInterval(id);
+    }
+  }, [delay]);
+}
+
+
+
+src/lib/utils.ts
+================
+
+import { clsx, type ClassValue } from "clsx"
+import { twMerge } from "tailwind-merge"
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs))
+}
+
+
+
+src/pages/Config.tsx
+====================
+
+import { useEffect, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { configApi, type ConfigData } from '@/lib/api';
+import { Separator } from '@/components/ui/separator';
+
+interface ConfigFormData {
+  maxFileSize: number;    // KB
+  maxLogs: number;
+  urlFilters: string;     // Como string para el input, se convertirá a array
+  port: number;
+  logDir: string;
+  customLogPath: string;  // Ruta personalizada seleccionada por el usuario
+  monitoringEnabled: boolean;
+  monitoringInterval: number;
+}
+
+export default function Config() {
+  const [formData, setFormData] = useState<ConfigFormData>({
+    maxFileSize: 50,          // KB
+    maxLogs: 10,
+    urlFilters: '',           // Como string, se convertirá a array
+    port: 7845,
+    logDir: 'logs',
+    customLogPath: '',        // Ruta personalizada vacía por defecto
+    monitoringEnabled: false,
+    monitoringInterval: 1000
+  });
+
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [serverInfo, setServerInfo] = useState<{ isActive: boolean, fileInfo?: any } | null>(null);
+
+  // Función para manejar la selección de directorio
+  const handleDirectorySelect = async () => {
+    try {
+      // Usar la API de File System Access (moderna)
+      if ('showDirectoryPicker' in window) {
+        const dirHandle = await (window as any).showDirectoryPicker();
+        setFormData(prev => ({ ...prev, customLogPath: dirHandle.name }));
+        setMessage({ type: 'success', text: `Directorio seleccionado: ${dirHandle.name}` });
+      } else {
+        // Fallback para navegadores que no soportan File System Access API
+        setMessage({ type: 'error', text: 'Tu navegador no soporta selección de directorios. Usa el campo de texto.' });
+      }
+    } catch (error) {
+      if ((error as any).name !== 'AbortError') {
+        console.error('Error selecting directory:', error);
+        setMessage({ type: 'error', text: 'Error al seleccionar directorio' });
+      }
+    }
+  };
+
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        setLoading(true);
+        const response = await configApi.getConfig();
+
+        if (response.status === 'success' && response.data) {
+          const config = response.data;
+          setFormData({
+            maxFileSize: config.maxFileSize,
+            maxLogs: config.maxLogs,
+            urlFilters: config.urlFilters.join(', '), // Convertir array a string
+            port: config.port,
+            logDir: config.logDir,
+            customLogPath: '',        // Mantener vacío, se llenará cuando el usuario seleccione
+            monitoringEnabled: config.monitoring.enabled,
+            monitoringInterval: config.monitoring.intervalMs
+          });
+
+          setServerInfo({
+            isActive: config.isActive || false,
+            fileInfo: config.fileInfo
+          });
+        }
+      } catch (error) {
+        console.error('Error al cargar la configuración:', error);
+        setMessage({ type: 'error', text: 'Error al cargar la configuración del servidor' });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadConfig();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    try {
+      setLoading(true);
+      setMessage(null);
+
+      // Convertir formData al formato esperado por el servidor
+      const configToSend = {
+        maxFileSize: formData.maxFileSize,
+        maxLogs: formData.maxLogs,
+        urlFilters: formData.urlFilters.split(',').map(f => f.trim()).filter(f => f.length > 0),
+        port: formData.port,
+        logDir: formData.customLogPath || formData.logDir, // Usar directorio personalizado si está disponible
+        monitoring: {
+          enabled: formData.monitoringEnabled,
+          intervalMs: formData.monitoringInterval
+        }
+      };
+
+      const response = await configApi.updateConfig(configToSend);
+
+      if (response.status === 'success') {
+        setMessage({ type: 'success', text: 'Configuración guardada correctamente' });
+      } else {
+        setMessage({ type: 'error', text: response.message || 'Error al guardar la configuración' });
+      }
+    } catch (error) {
+      console.error('Error al guardar la configuración:', error);
+      setMessage({ type: 'error', text: 'Error de conexión con el servidor' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Estado del servidor */}
+      {serverInfo && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Estado del Servidor</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${serverInfo.isActive ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <span>{serverInfo.isActive ? 'Monitoreo Activo' : 'Monitoreo Inactivo'}</span>
+            </div>
+            {serverInfo.fileInfo && (
+              <div className="mt-2 text-sm text-gray-600">
+                <p>Archivo: {serverInfo.fileInfo.path}</p>
+                <p>Tamaño: {(serverInfo.fileInfo.size / 1024).toFixed(2)} KB</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Mensajes */}
+      {message && (
+        <Card className={message.type === 'error' ? 'border-red-500' : 'border-green-500'}>
+          <CardContent className="pt-6">
+            <p className={message.type === 'error' ? 'text-red-600' : 'text-green-600'}>
+              {message.text}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Formulario de configuración */}
+      <form onSubmit={handleSubmit}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Configuración del Sistema</CardTitle>
+            <CardDescription>
+              Ajusta la configuración del monitor de logs DevPipe
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Configuración de archivos */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Archivos y Logs</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="logDir">Directorio de logs (por defecto)</Label>
+                <Input
+                  id="logDir"
+                  value={formData.logDir}
+                  onChange={(e) => setFormData(prev => ({ ...prev, logDir: e.target.value }))}
+                  placeholder="logs"
+                />
+                <p className="text-sm text-gray-500">
+                  Directorio por defecto donde se guardarán los logs
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="customLogPath">Directorio personalizado para esta sesión</Label>
+                <div className="flex space-x-2">
+                  <Input
+                    id="customLogPath"
+                    value={formData.customLogPath}
+                    onChange={(e) => setFormData(prev => ({ ...prev, customLogPath: e.target.value }))}
+                    placeholder="Selecciona un directorio o escribe la ruta..."
+                    className="flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleDirectorySelect}
+                  >
+                    Examinar
+                  </Button>
+                </div>
+                <p className="text-sm text-gray-500">
+                  Selecciona un directorio específico donde guardar los logs de esta sesión
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxFileSize">Tamaño máximo del archivo (KB)</Label>
+                <Input
+                  id="maxFileSize"
+                  type="number"
+                  value={formData.maxFileSize}
+                  onChange={(e) => setFormData(prev => ({ ...prev, maxFileSize: parseInt(e.target.value) || 0 }))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxLogs">Número máximo de logs a mostrar</Label>
+                <Input
+                  id="maxLogs"
+                  type="number"
+                  value={formData.maxLogs}
+                  onChange={(e) => setFormData(prev => ({ ...prev, maxLogs: parseInt(e.target.value) || 0 }))}
+                />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Configuración de red */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Red y Puerto</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="port">Puerto del servidor</Label>
+                <Input
+                  id="port"
+                  type="number"
+                  value={formData.port}
+                  onChange={(e) => setFormData(prev => ({ ...prev, port: parseInt(e.target.value) || 7845 }))}
+                />
+                <p className="text-sm text-gray-500">
+                  Puerto donde el servidor DevPipe escuchará las conexiones
+                </p>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Configuración de filtros */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Filtros</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="urlFilters">Filtros de URL (separados por comas)</Label>
+                <Input
+                  id="urlFilters"
+                  value={formData.urlFilters}
+                  onChange={(e) => setFormData(prev => ({ ...prev, urlFilters: e.target.value }))}
+                  placeholder="localhost, 127.0.0.1, example.com"
+                />
+                <p className="text-sm text-gray-500">
+                  URLs que serán filtradas del monitoreo
+                </p>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Configuración de monitoreo */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Monitoreo</h3>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="monitoringEnabled"
+                  checked={formData.monitoringEnabled}
+                  onChange={(e) => setFormData(prev => ({ ...prev, monitoringEnabled: e.target.checked }))}
+                  className="rounded"
+                />
+                <Label htmlFor="monitoringEnabled">Habilitar monitoreo automático</Label>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="monitoringInterval">Intervalo de monitoreo (ms)</Label>
+                <Input
+                  id="monitoringInterval"
+                  type="number"
+                  value={formData.monitoringInterval}
+                  onChange={(e) => setFormData(prev => ({ ...prev, monitoringInterval: parseInt(e.target.value) || 1000 }))}
+                />
+              </div>
+            </div>
+
+            <div className="pt-4">
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Guardando...' : 'Guardar Configuración'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </form>
+    </div>
+  );
+}
+
+
+
+src/pages/Monitor.tsx
+=====================
+
+import { useEffect, useState } from "react"
+import { useInterval } from "@/lib/hooks"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Separator } from "@/components/ui/separator"
+import { logsApi, monitoringApi, type LogEntry } from "@/lib/api"
+import { PlayIcon, PauseIcon, SquareIcon, TrashIcon, RefreshCwIcon } from "lucide-react"
+
+type MonitoringState = "stopped" | "running" | "paused";
+
+export default function Monitor() {
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [filter, setFilter] = useState("");
+  const [monitoringState, setMonitoringState] = useState<MonitoringState>("stopped");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [logLimit, setLogLimit] = useState(25);
+
+  const fetchLogs = async () => {
+    try {
+      setError(null);
+      const response = await logsApi.getRecentLogs(logLimit);
+
+      if (response.status === 'success' && response.data) {
+        setLogs(response.data);
+      } else if (response.status === 'monitoring_disabled') {
+        setError('El monitoreo está desactivado en el servidor');
+      } else {
+        setError(response.message || 'Error al obtener logs');
+      }
+    } catch (error) {
+      console.error("Error fetching logs:", error);
+      setError('Error de conexión con el servidor');
+    }
+  };
+
+  const toggleMonitoring = async (newState: MonitoringState) => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      switch (newState) {
+        case "running":
+          const startResponse = await monitoringApi.startMonitoring();
+          if (startResponse.status === 'success') {
+            setMonitoringState(newState);
+          } else {
+            setError(startResponse.message || 'Error al iniciar monitoreo');
+          }
+          break;
+        case "stopped":
+          const stopResponse = await monitoringApi.stopMonitoring();
+          if (stopResponse.status === 'success') {
+            setMonitoringState(newState);
+          } else {
+            setError(stopResponse.message || 'Error al detener monitoreo');
+          }
+          break;
+        case "paused":
+          // Para pausar, simplemente cambiamos el estado local
+          setMonitoringState(newState);
+          break;
+      }
+    } catch (error) {
+      console.error("Error toggling monitoring:", error);
+      setError('Error de conexión con el servidor');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearLogs = async () => {
+    try {
+      setLoading(true);
+      const response = await logsApi.clearLogs();
+
+      if (response.status === 'success') {
+        setLogs([]);
+      } else {
+        setError(response.message || 'Error al limpiar logs');
+      }
+    } catch (error) {
+      console.error("Error clearing logs:", error);
+      setError('Error de conexión con el servidor');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useInterval(fetchLogs, monitoringState === "running" ? 1000 : null);
+
+  // Obtener estado inicial del monitoreo
+  useEffect(() => {
+    const getInitialStatus = async () => {
+      try {
+        const statusResponse = await monitoringApi.getStatus();
+        if (statusResponse.status === 'success' && statusResponse.data) {
+          setMonitoringState(statusResponse.data.isActive ? 'running' : 'stopped');
+        }
+      } catch (error) {
+        console.error('Error getting initial monitoring status:', error);
+      }
+    };
+
+    getInitialStatus();
+    fetchLogs();
+  }, [logLimit]);
+
+  const filteredLogs = filter
+    ? logs.filter(log =>
+        log.message.toLowerCase().includes(filter.toLowerCase()) ||
+        log.level.toLowerCase().includes(filter.toLowerCase()) ||
+        (log.url && log.url.toLowerCase().includes(filter.toLowerCase())) ||
+        (log.source && log.source.toLowerCase().includes(filter.toLowerCase()))
+      )
+    : logs;
+
+  const formatTimestamp = (timestamp: string) => {
+    try {
+      return new Date(timestamp).toLocaleTimeString();
+    } catch {
+      return timestamp;
+    }
+  };
+
+  const getLevelColor = (level: string) => {
+    switch (level.toLowerCase()) {
+      case 'error': return 'text-red-600';
+      case 'warn': return 'text-yellow-600';
+      case 'info': return 'text-blue-600';
+      case 'external': return 'text-purple-600';
+      default: return 'text-gray-600';
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Estado y controles */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            <span>Monitor de Logs DevPipe</span>
+            <div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${
+                monitoringState === 'running' ? 'bg-green-500' :
+                monitoringState === 'paused' ? 'bg-yellow-500' : 'bg-red-500'
+              }`}></div>
+              <span className="text-sm text-gray-600 capitalize">{monitoringState}</span>
+            </div>
+          </CardTitle>
+          <CardDescription>
+            Monitor y analiza logs en tiempo real desde el servidor DevPipe
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {/* Controles de monitoreo */}
+            <div className="flex items-center gap-2">
+              <Button
+                variant={monitoringState === "running" ? "secondary" : "default"}
+                onClick={() => toggleMonitoring("running")}
+                disabled={loading}
+              >
+                <PlayIcon className="h-4 w-4 mr-2" />
+                Iniciar
+              </Button>
+              <Button
+                variant={monitoringState === "paused" ? "secondary" : "default"}
+                onClick={() => toggleMonitoring("paused")}
+                disabled={loading}
+              >
+                <PauseIcon className="h-4 w-4 mr-2" />
+                Pausar
+              </Button>
+              <Button
+                variant={monitoringState === "stopped" ? "secondary" : "default"}
+                onClick={() => toggleMonitoring("stopped")}
+                disabled={loading}
+              >
+                <SquareIcon className="h-4 w-4 mr-2" />
+                Detener
+              </Button>
+
+              <Separator orientation="vertical" className="h-8" />
+
+              <Button
+                variant="outline"
+                onClick={fetchLogs}
+                disabled={loading}
+              >
+                <RefreshCwIcon className="h-4 w-4 mr-2" />
+                Actualizar
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={clearLogs}
+                disabled={loading}
+              >
+                <TrashIcon className="h-4 w-4 mr-2" />
+                Limpiar
+              </Button>
+            </div>
+
+            {/* Configuración */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center space-x-2">
+                <Label htmlFor="logLimit">Límite:</Label>
+                <Input
+                  id="logLimit"
+                  type="number"
+                  value={logLimit}
+                  onChange={(e) => setLogLimit(parseInt(e.target.value) || 25)}
+                  className="w-20"
+                  min="1"
+                  max="100"
+                />
+              </div>
+
+              <div className="flex-1">
+                <Label htmlFor="filter">Filtrar logs:</Label>
+                <Input
+                  id="filter"
+                  placeholder="Buscar en mensaje, nivel, URL o fuente..."
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Mensajes de error */}
+      {error && (
+        <Card className="border-red-500">
+          <CardContent className="pt-6">
+            <p className="text-red-600">{error}</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Lista de logs */}
+      <Card>
+        <CardHeader>
+          <CardTitle>
+            Logs Recientes ({filteredLogs.length} de {logs.length})
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-[500px] overflow-auto rounded-md border bg-gray-50 p-4">
+            {filteredLogs.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                {logs.length === 0 ? 'No hay logs disponibles' : 'No hay logs que coincidan con el filtro'}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredLogs.map((log, index) => (
+                  <div key={index} className="border-b border-gray-200 pb-2 last:border-b-0">
+                    <div className="flex items-start justify-between text-xs text-gray-500 mb-1">
+                      <div className="flex items-center space-x-2">
+                        <span className={`font-medium ${getLevelColor(log.level)}`}>
+                          [{log.level.toUpperCase()}]
+                        </span>
+                        {log.source && (
+                          <span className="bg-gray-200 px-1 rounded">
+                            {log.source}
+                          </span>
+                        )}
+                      </div>
+                      <span>{formatTimestamp(log.timestamp)}</span>
+                    </div>
+                    <div className="font-mono text-sm text-gray-800 whitespace-pre-wrap">
+                      {log.message}
+                    </div>
+                    {log.url && (
+                      <div className="text-xs text-blue-600 mt-1">
+                        {log.url}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+
+
+src/styles/index.css
+====================
+
+@import "tailwindcss";
+
+/* Estilos base para la aplicación */
+:root {
+  --primary-50: #f0f9ff;
+  --primary-100: #e0f2fe;
+  --primary-200: #bae6fd;
+  --primary-300: #7dd3fc;
+  --primary-400: #38bdf8;
+  --primary-500: #0ea5e9;
+  --primary-600: #0284c7;
+  --primary-700: #0369a1;
+  --primary-800: #075985;
+  --primary-900: #0c4a6e;
+}
+
+/* Estilos globales */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Estilos para componentes personalizados */
+.devpipe-card {
+  @apply bg-white rounded-lg border border-gray-200 shadow-sm;
+}
+
+.devpipe-button-primary {
+  @apply bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md transition-colors duration-200;
+}
+
+.devpipe-button-secondary {
+  @apply bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-md border border-gray-300 transition-colors duration-200;
+}
+

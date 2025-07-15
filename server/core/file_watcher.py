@@ -19,7 +19,7 @@ class LogFileHandler(FileSystemEventHandler):
         try:
             if hasattr(event, 'src_path') and event.src_path is not None:
                 # Convertir a string de forma segura
-                path_str = str(event.src_path)  # type: ignore
+                path_str = str(event.src_path)
                 self.callback(path_str)
         except Exception as e:
             print(f"Error en on_modified: {e}")
@@ -45,10 +45,11 @@ class FileWatcher:
             self.active = False
             self.watched_files.clear()
     
+    @property
     def is_active(self) -> bool:
         """
         Verifica si el monitoreo está activo.
-        
+
         Returns:
             bool: True si el monitoreo está activo
         """
@@ -76,8 +77,8 @@ class FileWatcher:
         try:
             file_dir = os.path.dirname(file_path)
             handler = LogFileHandler(callback if callback else lambda x: None)
-            
-            watch = self.observer.schedule(handler, file_dir, recursive=False)  # type: ignore
+
+            watch = self.observer.schedule(handler, file_dir, recursive=False)
             
             self.watched_files[file_path] = {
                 "handler": handler,
@@ -109,7 +110,7 @@ class FileWatcher:
         
         try:
             watch = self.watched_files[file_path]["watch"]
-            self.observer.unschedule(watch)  # type: ignore
+            self.observer.unschedule(watch)
             del self.watched_files[file_path]
             return True
         except Exception as e:

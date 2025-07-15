@@ -24,6 +24,9 @@ var/
 venv/
 ENV/
 
+client/node_modules/
+client/dist/
+
 # IDE
 .idea/
 .vscode/
