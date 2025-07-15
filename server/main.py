@@ -17,7 +17,7 @@ from api.directory_routes import directory_routes
 directory_manager = DirectoryManager()
 log_manager = LogManager(directory_manager=directory_manager)
 
-def kill_process_on_port(port):
+def kill_process_on_port(port: int) -> bool:
     """
     Mata cualquier proceso que esté usando el puerto especificado.
 
@@ -85,7 +85,7 @@ def kill_process_on_port(port):
         print(f"❌ Error al liberar puerto {port}: {e}")
         return False
 
-def is_port_available(port):
+def is_port_available(port: int) -> bool:
     """
     Verifica si un puerto está disponible.
 
@@ -102,7 +102,7 @@ def is_port_available(port):
     except OSError:
         return False
 
-def ensure_port_available(port):
+def ensure_port_available(port: int) -> bool:
     """
     Asegura que el puerto esté disponible, liberándolo si es necesario.
     Intenta múltiples veces y métodos para liberar el puerto.
@@ -154,7 +154,7 @@ log_manager = LogManager(base_dir=config_manager.get_config().get('logDir', 'log
 app.register_blueprint(directory_routes)
 file_watcher = FileWatcher()
 
-def on_external_log(file_path: str):
+def on_external_log(file_path: str) -> None:
     """Callback para cuando hay cambios en un archivo externo"""
     if not file_watcher.is_active or not log_manager.is_active:
         return
