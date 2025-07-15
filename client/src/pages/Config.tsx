@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { configApi, monitoringApi, directoryApi, tokenStorage } from '@/lib/api';
+import type { DirectoryInfo } from '@/lib/api';
 import { Separator } from '@/components/ui/separator';
 
 interface ConfigFormData {
@@ -16,6 +17,18 @@ interface ConfigFormData {
   directoryToken: string; // Token del directorio personalizado
   monitoringEnabled: boolean;
   monitoringInterval: number;
+}
+
+interface FileInfo {
+  path: string;
+  size: number;
+  exists: boolean;
+  last_modified: string;
+}
+
+interface ServerInfo {
+  isActive: boolean;
+  fileInfo?: FileInfo;
 }
 
 export default function Config() {
@@ -33,10 +46,10 @@ export default function Config() {
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
-  const [serverInfo, setServerInfo] = useState<{ isActive: boolean, fileInfo?: any } | null>(null);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [monitoringActive, setMonitoringActive] = useState(false);
-  const [directoryInfo, setDirectoryInfo] = useState<any>(null);
-  const [availableDirectories, setAvailableDirectories] = useState<Array<{ token: string; path: string; info: any }>>([]);
+  const [directoryInfo, setDirectoryInfo] = useState<DirectoryInfo | null>(null);
+  const [availableDirectories, setAvailableDirectories] = useState<Array<{ token: string; path: string; info: DirectoryInfo }>>([]);
 
 
 
@@ -84,8 +97,8 @@ export default function Config() {
       const response = await directoryApi.saveDirectory(trimmedPath);
       console.log('Respuesta del servidor:', response);
 
-      if (response.status === 'success' && response.data) {
-        const { token, info } = response.data;
+      if (response.success && response.token && response.info) {
+        const { token, info } = response;
         tokenStorage.setDirectoryToken(token);
         setFormData(prev => ({
           ...prev,
@@ -568,9 +581,11 @@ export default function Config() {
                           <div>
                             <strong>Tamaño:</strong> {(directoryInfo.logFile.size / 1024).toFixed(2)} KB
                           </div>
+                          {directoryInfo.logFile.lastModified && (
                           <div>
                             <strong>Última modificación:</strong> {new Date(directoryInfo.logFile.lastModified).toLocaleString()}
                           </div>
+                          )}
                           <div className="text-green-500 text-xs mt-1">
                             🎉 El archivo ya existe y contiene logs
                           </div>

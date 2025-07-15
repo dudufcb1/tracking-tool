@@ -1,5 +1,5 @@
-from flask import Blueprint, jsonify, request
-from typing import Optional
+from flask import Blueprint, jsonify, request, Response
+from typing import Optional, Dict, Any, List, Union
 from core.directory_manager import DirectoryManager
 
 # Crear Blueprint para las rutas de directorios
@@ -14,10 +14,12 @@ def init_directory_manager(dm: DirectoryManager) -> None:
     directory_manager = dm
 
 @directory_routes.route('/api/save-directory', methods=['POST'])
-def save_directory():
+def save_directory() -> Union[Response, tuple[Response, int]]:
     """Endpoint para guardar un directorio y generar un token."""
+    if directory_manager is None:
+        return jsonify({"success": False, "message": "Directory manager not initialized"}), 500
     try:
-        data = request.get_json()
+        data: Optional[Dict[str, Any]] = request.get_json()
         if not data or 'path' not in data:
             return jsonify({
                 "success": False,
@@ -45,10 +47,12 @@ def save_directory():
         }), 500
 
 @directory_routes.route('/api/directory-info', methods=['GET'])
-def get_directory_info():
+def get_directory_info() -> Union[Response, tuple[Response, int]]:
     """Endpoint para obtener información de un directorio."""
+    if directory_manager is None:
+        return jsonify({"status": "error", "message": "Directory manager not initialized"}), 500
     try:
-        token = request.args.get('token')
+        token: Optional[str] = request.args.get('token')
         if not token:
             return jsonify({
                 "status": "error",
@@ -76,10 +80,12 @@ def get_directory_info():
         }), 500
 
 @directory_routes.route('/api/directory', methods=['DELETE'])
-def remove_directory():
+def remove_directory() -> Union[Response, tuple[Response, int]]:
     """Endpoint para eliminar la configuración de un directorio."""
+    if directory_manager is None:
+        return jsonify({"success": False, "message": "Directory manager not initialized"}), 500
     try:
-        token = request.args.get('token')
+        token: Optional[str] = request.args.get('token')
         if not token:
             return jsonify({
                 "success": False,
@@ -104,10 +110,12 @@ def remove_directory():
         }), 500
 
 @directory_routes.route('/api/directories', methods=['GET'])
-def list_directories():
+def list_directories() -> Union[Response, tuple[Response, int]]:
     """Endpoint para listar todos los directorios configurados."""
+    if directory_manager is None:
+        return jsonify({"status": "error", "message": "Directory manager not initialized"}), 500
     try:
-        directories = []
+        directories: List[Dict[str, Any]] = []
         for token, path in directory_manager.directory_tokens.items():
             info = directory_manager.get_directory_info(token)
             directories.append({
