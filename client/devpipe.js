@@ -265,16 +265,46 @@
 
     // Función para obtener URL del servidor
     function getServerUrl() {
-        // Intentar detectar automáticamente el puerto del servidor DevPipe
+        // Verificar si hay un puerto personalizado en localStorage
+        const customPort = localStorage.getItem('devpipe_port');
         const hostname = window.location.hostname || 'localhost';
 
-        // Si estamos en el mismo host que DevPipe, usar el puerto correcto
+        if (customPort) {
+            console.log(`[DevPipe] Usando puerto personalizado desde localStorage: ${customPort}`);
+            return `http://${hostname}:${customPort}`;
+        }
+
+        // Si estamos en el mismo host que DevPipe, usar el puerto por defecto
         if (hostname === 'localhost' || hostname === '127.0.0.1') {
             return `http://${hostname}:7845`;
         }
 
         // Por defecto, usar localhost:7845
         return 'http://localhost:7845';
+    }
+
+    // Función para configurar puerto personalizado
+    function setCustomPort(port) {
+        if (port && !isNaN(port) && port > 0 && port <= 65535) {
+            localStorage.setItem('devpipe_port', port.toString());
+            console.log(`[DevPipe] Puerto personalizado configurado: ${port}`);
+            return true;
+        } else {
+            console.error('[DevPipe] Puerto inválido:', port);
+            return false;
+        }
+    }
+
+    // Función para limpiar puerto personalizado
+    function clearCustomPort() {
+        localStorage.removeItem('devpipe_port');
+        console.log('[DevPipe] Puerto personalizado eliminado, usando puerto por defecto');
+    }
+
+    // Función para obtener puerto actual
+    function getCurrentPort() {
+        const customPort = localStorage.getItem('devpipe_port');
+        return customPort ? parseInt(customPort) : 7845;
     }
 
     // Función para determinar si debe activarse
@@ -321,7 +351,12 @@
         pause: () => devPipeClient.pause(),
         resume: () => devPipeClient.resume(),
         restore: () => devPipeClient.restore(),
-        config: CONFIG
+        config: CONFIG,
+        // Funciones para manejo de puerto personalizado
+        setPort: setCustomPort,
+        clearPort: clearCustomPort,
+        getCurrentPort: getCurrentPort,
+        getServerUrl: getServerUrl
     };
 
     // Log de inicialización

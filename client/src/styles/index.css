@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+@theme {
+  /* Colores personalizados del tema */
+  --color-primary-50: oklch(0.98 0.02 250);
+  --color-primary-100: oklch(0.96 0.04 250);
+  --color-primary-200: oklch(0.94 0.06 250);
+  --color-primary-300: oklch(0.92 0.08 250);
+  --color-primary-400: oklch(0.90 0.10 250);
+  --color-primary-500: oklch(0.88 0.12 250);
+  --color-primary-600: oklch(0.86 0.14 250);
+  --color-primary-700: oklch(0.84 0.16 250);
+  --color-primary-800: oklch(0.82 0.18 250);
+  --color-primary-900: oklch(0.80 0.20 250);
+  --color-primary-950: oklch(0.78 0.22 250);
+  
+  /* Breakpoints */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+  --breakpoint-xl: 1280px;
+  --breakpoint-2xl: 1536px;
+}
+
+/* Definiciones de utilidades personalizadas */
+@utility btn {
+  border-radius: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-weight: 500;
+  transition-property: color, background-color, border-color, outline-color, text-decoration-color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+@utility btn-primary {
+  background-color: var(--color-primary-600);
+  color: white;
+}
+
+@utility btn-primary:hover {
+  background-color: var(--color-primary-700);
+}
+
+@utility btn-secondary {
+  background-color: white;
+  border: 1px solid var(--color-primary-600);
+  color: var(--color-primary-600);
+}
+
+@utility btn-secondary:hover {
+  background-color: var(--color-primary-50);
+}
