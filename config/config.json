@@ -1,0 +1,11 @@
+{
+  "maxFileSize": 120,
+  "maxLogs": 25,
+  "urlFilters": [],
+  "port": 7845,
+  "logDir": "logs",
+  "monitoring": {
+    "enabled": false,
+    "intervalMs": 1000
+  }
+}
