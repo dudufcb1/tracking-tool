@@ -1,11 +1,17 @@
 from flask import Blueprint, jsonify, request
+from typing import Optional
 from core.directory_manager import DirectoryManager
-
-# Crear instancia de DirectoryManager
-directory_manager = DirectoryManager()
 
 # Crear Blueprint para las rutas de directorios
 directory_routes = Blueprint('directory_routes', __name__)
+
+# Variable global para el DirectoryManager (se asignará desde main.py)
+directory_manager: Optional[DirectoryManager] = None
+
+def init_directory_manager(dm: DirectoryManager) -> None:
+    """Inicializa el DirectoryManager desde main.py"""
+    global directory_manager
+    directory_manager = dm
 
 @directory_routes.route('/api/save-directory', methods=['POST'])
 def save_directory():
@@ -45,25 +51,27 @@ def get_directory_info():
         token = request.args.get('token')
         if not token:
             return jsonify({
-                "success": False,
+                "status": "error",
                 "message": "Token no proporcionado"
             }), 400
             
         info = directory_manager.get_directory_info(token)
         if not info:
             return jsonify({
-                "success": False,
+                "status": "error",
                 "message": "Token inválido o directorio no encontrado"
             }), 404
             
         return jsonify({
-            "success": True,
-            "info": info
+            "status": "success",
+            "data": {
+                "info": info
+            }
         })
         
     except Exception as e:
         return jsonify({
-            "success": False,
+            "status": "error",
             "message": f"Error interno: {str(e)}"
         }), 500
 
@@ -77,7 +85,7 @@ def remove_directory():
                 "success": False,
                 "message": "Token no proporcionado"
             }), 400
-            
+
         if directory_manager.remove_token(token):
             return jsonify({
                 "success": True,
@@ -88,9 +96,33 @@ def remove_directory():
                 "success": False,
                 "message": "Token inválido o directorio no encontrado"
             }), 404
-            
+
     except Exception as e:
         return jsonify({
             "success": False,
+            "message": f"Error interno: {str(e)}"
+        }), 500
+
+@directory_routes.route('/api/directories', methods=['GET'])
+def list_directories():
+    """Endpoint para listar todos los directorios configurados."""
+    try:
+        directories = []
+        for token, path in directory_manager.directory_tokens.items():
+            info = directory_manager.get_directory_info(token)
+            directories.append({
+                "token": token,
+                "path": path,
+                "info": info
+            })
+
+        return jsonify({
+            "status": "success",
+            "data": directories
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
             "message": f"Error interno: {str(e)}"
         }), 500

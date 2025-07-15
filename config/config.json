@@ -3,7 +3,7 @@
   "maxLogs": 25,
   "urlFilters": [],
   "port": 7845,
-  "logDir": "ewm-modal-cta",
+  "logDir": "/var/www/html/plugins/wp-content/x/ewm-modal-cta",
   "monitoring": {
     "enabled": false,
     "intervalMs": 1000

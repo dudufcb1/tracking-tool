@@ -8,7 +8,7 @@ class DirectoryManager:
     def __init__(self, base_dir: str = "logs", tokens_file: str = "config/directory_tokens.json"):
         """
         Inicializa el gestor de directorios.
-        
+
         Args:
             base_dir: Directorio base para logs por defecto
             tokens_file: Archivo para persistir los tokens
@@ -17,6 +17,7 @@ class DirectoryManager:
         self.tokens_file = tokens_file
         self.directory_tokens: Dict[str, str] = {}
         self._load_tokens()
+        self._clean_duplicate_tokens()
     
     def _load_tokens(self):
         """Carga los tokens guardados desde el archivo."""
@@ -68,7 +69,7 @@ class DirectoryManager:
             directory_path: Ruta al directorio
             
         Returns:
-            str: Token generado
+            str: Token generado o existente si el directorio ya está registrado
             
         Raises:
             ValueError: Si la ruta es inválida
@@ -80,7 +81,12 @@ class DirectoryManager:
             # Verificar que el directorio existe o se puede crear
             os.makedirs(abs_path, exist_ok=True)
             
-            # Generar token
+            # Verificar si el directorio ya tiene un token asignado
+            for existing_token, existing_path in self.directory_tokens.items():
+                if existing_path == abs_path:
+                    return existing_token
+            
+            # Si no existe, generar nuevo token
             token = self._generate_token()
             
             # Guardar mapeo token -> ruta
@@ -123,28 +129,64 @@ class DirectoryManager:
     def get_directory_info(self, token: str) -> Dict[str, Any]:
         """
         Obtiene información sobre el directorio asociado a un token.
-        
+
         Args:
             token: Token del directorio
-            
+
         Returns:
             Dict[str, Any]: Información del directorio o diccionario vacío si no existe
         """
         directory = self.get_directory(token)
         if not directory:
             return {}
-            
+
         info: Dict[str, Any] = {
             "path": directory,
             "exists": os.path.exists(directory),
             "isWritable": os.access(directory, os.W_OK),
             "created": None,
-            "lastModified": None
+            "lastModified": None,
+            "logFile": {
+                "exists": False,
+                "size": 0,
+                "lastModified": None,
+                "path": None
+            }
         }
-        
+
         if info["exists"]:
             stat = os.stat(directory)
             info["created"] = datetime.fromtimestamp(stat.st_ctime).isoformat()
             info["lastModified"] = datetime.fromtimestamp(stat.st_mtime).isoformat()
-            
+
+            # Verificar el archivo devpipe.log
+            log_file_path = os.path.join(directory, "devpipe.log")
+            info["logFile"]["path"] = log_file_path
+
+            if os.path.exists(log_file_path):
+                info["logFile"]["exists"] = True
+                log_stat = os.stat(log_file_path)
+                info["logFile"]["size"] = log_stat.st_size
+                info["logFile"]["lastModified"] = datetime.fromtimestamp(log_stat.st_mtime).isoformat()
+
         return info
+    
+    def _clean_duplicate_tokens(self):
+        """Limpia los tokens duplicados manteniendo solo uno por directorio."""
+        unique_paths = {}
+        tokens_to_remove = []
+
+        # Identificar tokens duplicados, mantener el primero encontrado
+        for token, path in self.directory_tokens.items():
+            if path in unique_paths:
+                tokens_to_remove.append(token)
+            else:
+                unique_paths[path] = token
+
+        # Eliminar tokens duplicados
+        for token in tokens_to_remove:
+            del self.directory_tokens[token]
+
+        # Guardar cambios si se eliminó algún duplicado
+        if tokens_to_remove:
+            self._save_tokens()

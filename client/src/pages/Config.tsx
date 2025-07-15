@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { configApi, monitoringApi } from '@/lib/api';
+import { configApi, monitoringApi, directoryApi, tokenStorage } from '@/lib/api';
 import { Separator } from '@/components/ui/separator';
 
 interface ConfigFormData {
@@ -13,6 +13,7 @@ interface ConfigFormData {
   port: number;
   logDir: string;
   customLogPath: string;  // Ruta personalizada seleccionada por el usuario
+  directoryToken: string; // Token del directorio personalizado
   monitoringEnabled: boolean;
   monitoringInterval: number;
 }
@@ -25,6 +26,7 @@ export default function Config() {
     port: 7845,
     logDir: 'logs',
     customLogPath: '',        // Ruta personalizada vacía por defecto
+    directoryToken: '',       // Token del directorio personalizado
     monitoringEnabled: false,
     monitoringInterval: 1000
   });
@@ -33,24 +35,136 @@ export default function Config() {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [serverInfo, setServerInfo] = useState<{ isActive: boolean, fileInfo?: any } | null>(null);
   const [monitoringActive, setMonitoringActive] = useState(false);
+  const [directoryInfo, setDirectoryInfo] = useState<any>(null);
+  const [availableDirectories, setAvailableDirectories] = useState<Array<{ token: string; path: string; info: any }>>([]);
 
-  // Función para manejar la selección de directorio
-  const handleDirectorySelect = async () => {
+
+
+  // Función para manejar el cambio manual de directorio (solo actualiza el estado)
+  const handleCustomPathChange = (newPath: string) => {
+    setFormData(prev => ({ ...prev, customLogPath: newPath }));
+
+    // Si el usuario borra el campo, limpiar el token
+    if (!newPath.trim()) {
+      if (formData.directoryToken) {
+        tokenStorage.removeDirectoryToken();
+        setFormData(prev => ({ ...prev, directoryToken: '' }));
+        setMessage(null);
+      }
+    }
+  };
+
+  // Función para añadir el directorio (ejecuta la validación y creación de token)
+  const handleAddDirectory = async () => {
+    const trimmedPath = formData.customLogPath.trim();
+
+    if (!trimmedPath) {
+      setMessage({
+        type: 'error',
+        text: 'Por favor ingresa una ruta de directorio'
+      });
+      return;
+    }
+
+    // Validar que parezca una ruta válida (debe empezar con / o contener :\ para Windows)
+    const isValidPath = trimmedPath.startsWith('/') || /^[A-Za-z]:\\/.test(trimmedPath);
+
+    if (!isValidPath) {
+      setMessage({
+        type: 'error',
+        text: 'Por favor ingresa una ruta completa válida (ej: /home/usuario/logs o C:\\Users\\usuario\\logs)'
+      });
+      return;
+    }
+
     try {
-      // Usar la API de File System Access (moderna)
-      if ('showDirectoryPicker' in window) {
-        const dirHandle = await (window as any).showDirectoryPicker();
-        setFormData(prev => ({ ...prev, customLogPath: dirHandle.name }));
-        setMessage({ type: 'success', text: `Directorio seleccionado: ${dirHandle.name}` });
+      setMessage(null);
+      console.log('Intentando añadir directorio:', trimmedPath);
+
+      const response = await directoryApi.saveDirectory(trimmedPath);
+      console.log('Respuesta del servidor:', response);
+
+      if (response.status === 'success' && response.data) {
+        const { token, info } = response.data;
+        tokenStorage.setDirectoryToken(token);
+        setFormData(prev => ({
+          ...prev,
+          directoryToken: token,
+          customLogPath: info.path // Actualizar el campo visual con la ruta real
+        }));
+        setDirectoryInfo(info);
+        setMessage({
+          type: 'success',
+          text: `Directorio configurado exitosamente: ${info.path}`
+        });
+
+        // Recargar la lista de directorios disponibles
+        loadAvailableDirectories();
       } else {
-        // Fallback para navegadores que no soportan File System Access API
-        setMessage({ type: 'error', text: 'Tu navegador no soporta selección de directorios. Usa el campo de texto.' });
+        setMessage({
+          type: 'error',
+          text: response.message || 'Error al configurar el directorio'
+        });
       }
     } catch (error) {
-      if ((error as any).name !== 'AbortError') {
-        console.error('Error selecting directory:', error);
-        setMessage({ type: 'error', text: 'Error al seleccionar directorio' });
+      console.error('Error creating token for manual path:', error);
+      setMessage({
+        type: 'error',
+        text: 'Error al comunicarse con el servidor. Verifica que el directorio existe y tienes permisos.'
+      });
+    }
+  };
+
+  // Función para limpiar el directorio personalizado
+  const handleClearCustomDirectory = async () => {
+    try {
+      if (formData.directoryToken) {
+        await directoryApi.removeDirectory(formData.directoryToken);
       }
+      tokenStorage.removeDirectoryToken();
+      setFormData(prev => ({
+        ...prev,
+        customLogPath: '', // Limpiar el campo visual
+        directoryToken: ''
+      }));
+      setDirectoryInfo(null);
+      setMessage({ type: 'success', text: 'Directorio personalizado eliminado' });
+    } catch (error) {
+      console.error('Error clearing directory:', error);
+      setMessage({ type: 'error', text: 'Error al limpiar el directorio' });
+    }
+  };
+
+  // Función para verificar el estado del directorio configurado
+  const checkDirectoryStatus = async () => {
+    try {
+      const token = formData.directoryToken;
+      if (!token) return;
+
+      const response = await directoryApi.getDirectoryInfo(token);
+      if (response.status === 'success' && response.data) {
+        setDirectoryInfo(response.data.info);
+        // Actualizar el campo visual con la ruta real
+        setFormData(prev => ({
+          ...prev,
+          customLogPath: response.data.info.path
+        }));
+        setMessage({
+          type: 'success',
+          text: `Estado del directorio actualizado: ${response.data.info.path}`
+        });
+      } else {
+        setMessage({
+          type: 'error',
+          text: 'No se pudo obtener información del directorio'
+        });
+      }
+    } catch (error) {
+      console.error('Error checking directory status:', error);
+      setMessage({
+        type: 'error',
+        text: 'Error al verificar el estado del directorio'
+      });
     }
   };
 
@@ -66,6 +180,18 @@ export default function Config() {
     }
   };
 
+  // Función para cargar directorios disponibles desde el backend
+  const loadAvailableDirectories = async () => {
+    try {
+      const response = await directoryApi.listDirectories();
+      if (response.status === 'success' && response.data) {
+        setAvailableDirectories(response.data);
+      }
+    } catch (error) {
+      console.error('Error loading available directories:', error);
+    }
+  };
+
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -74,6 +200,8 @@ export default function Config() {
 
         if (response.status === 'success' && response.data) {
           const config = response.data;
+          const savedToken = tokenStorage.getDirectoryToken() || '';
+
           setFormData({
             maxFileSize: config.maxFileSize,
             maxLogs: config.maxLogs,
@@ -81,6 +209,7 @@ export default function Config() {
             port: config.port,
             logDir: config.logDir,
             customLogPath: '',        // Mantener vacío, se llenará cuando el usuario seleccione
+            directoryToken: savedToken, // Cargar token guardado
             monitoringEnabled: config.monitoring.enabled,
             monitoringInterval: config.monitoring.intervalMs
           });
@@ -92,6 +221,26 @@ export default function Config() {
 
           // Actualizar estado del monitoreo
           setMonitoringActive(config.isActive || false);
+
+          // Si hay un token guardado, verificar el estado del directorio
+          if (savedToken) {
+            try {
+              const dirResponse = await directoryApi.getDirectoryInfo(savedToken);
+              if (dirResponse.status === 'success' && dirResponse.data) {
+                setDirectoryInfo(dirResponse.data.info);
+                // Actualizar el campo customLogPath con la ruta real
+                setFormData(prev => ({
+                  ...prev,
+                  customLogPath: dirResponse.data.info.path
+                }));
+              }
+            } catch (dirError) {
+              console.error('Error loading directory info:', dirError);
+              // Si hay error con el token, limpiarlo
+              tokenStorage.removeDirectoryToken();
+              setFormData(prev => ({ ...prev, directoryToken: '' }));
+            }
+          }
         }
       } catch (error) {
         console.error('Error al cargar la configuración:', error);
@@ -105,6 +254,9 @@ export default function Config() {
 
     // Verificar estado del monitoreo
     checkMonitoringStatus();
+
+    // Cargar directorios disponibles
+    loadAvailableDirectories();
 
     // Configurar un intervalo para verificar el estado del monitoreo periódicamente
     const intervalId = setInterval(checkMonitoringStatus, 5000);
@@ -126,7 +278,8 @@ export default function Config() {
         maxLogs: formData.maxLogs,
         urlFilters: formData.urlFilters.split(',').map(f => f.trim()).filter(f => f.length > 0),
         port: formData.port,
-        logDir: formData.customLogPath || formData.logDir, // Usar directorio personalizado si está disponible
+        logDir: formData.logDir, // Directorio base
+        customLogPath: formData.directoryToken, // Enviar el token en lugar de la ruta
         monitoring: {
           enabled: formData.monitoringEnabled,
           intervalMs: formData.monitoringInterval
@@ -159,12 +312,27 @@ export default function Config() {
           <CardContent>
             <div className="flex items-center space-x-2">
               <div className={`w-3 h-3 rounded-full ${serverInfo.isActive ? 'bg-green-500' : 'bg-red-500'}`}></div>
-              <span>{serverInfo.isActive ? 'Monitoreo Activo' : 'Monitoreo Inactivo'}</span>
+              <span className="font-medium">{serverInfo.isActive ? 'Monitoreo Activo' : 'Monitoreo Inactivo'}</span>
             </div>
             {serverInfo.fileInfo && (
-              <div className="mt-2 text-sm text-gray-600">
-                <p>Archivo: {serverInfo.fileInfo.path}</p>
-                <p>Tamaño: {(serverInfo.fileInfo.size / 1024).toFixed(2)} KB</p>
+              <div className="mt-3 text-sm border rounded p-3 bg-gray-50">
+                <p className="font-medium">Información del archivo de log:</p>
+                <p className="mt-1"><strong>Ruta:</strong> {serverInfo.fileInfo.path}</p>
+                <p><strong>Tamaño:</strong> {(serverInfo.fileInfo.size / 1024).toFixed(2)} KB</p>
+                <p><strong>Existe:</strong> {serverInfo.fileInfo.exists ? '✅ Sí' : '❌ No'}</p>
+                {serverInfo.fileInfo.last_modified && (
+                  <p><strong>Última modificación:</strong> {new Date(serverInfo.fileInfo.last_modified).toLocaleString()}</p>
+                )}
+                {!serverInfo.fileInfo.exists && serverInfo.isActive && (
+                  <p className="text-orange-500 mt-2">
+                    ⚠️ El archivo se creará cuando se reciba el primer log
+                  </p>
+                )}
+                {!serverInfo.fileInfo.exists && !serverInfo.isActive && (
+                  <p className="text-gray-500 mt-2">
+                    💡 El archivo se creará cuando inicies el monitoreo y se reciba el primer log
+                  </p>
+                )}
               </div>
             )}
           </CardContent>
@@ -231,31 +399,221 @@ export default function Config() {
                 </p>
               </div>
 
+              {/* Mostrar directorios disponibles */}
+              {availableDirectories.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Directorios configurados en el servidor</Label>
+                  <div className="border rounded p-3 bg-gray-50 max-h-32 overflow-y-auto">
+                    {availableDirectories.map((dir) => (
+                      <div key={dir.token} className="flex items-center justify-between py-1 text-sm">
+                        <span className="font-mono text-xs">{dir.path}</span>
+                        <div className="flex space-x-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                // Actualizar el frontend
+                                tokenStorage.setDirectoryToken(dir.token);
+                                setFormData(prev => ({
+                                  ...prev,
+                                  directoryToken: dir.token,
+                                  customLogPath: dir.path
+                                }));
+                                setDirectoryInfo(dir.info);
+
+                                // Enviar automáticamente al backend para actualizar el LogManager
+                                await configApi.updateConfig({
+                                  customLogPath: dir.token
+                                });
+
+                                // Recargar la información del servidor para reflejar el cambio
+                                const configResponse = await configApi.getConfig();
+                                if (configResponse.status === 'success' && configResponse.data) {
+                                  setServerInfo({
+                                    isActive: configResponse.data.isActive || false,
+                                    fileInfo: configResponse.data.fileInfo
+                                  });
+                                }
+
+                                setMessage({
+                                  type: 'success',
+                                  text: `Directorio seleccionado y configurado: ${dir.path}`
+                                });
+                              } catch (error) {
+                                console.error('Error configurando directorio:', error);
+                                setMessage({
+                                  type: 'error',
+                                  text: 'Error al configurar el directorio en el servidor'
+                                });
+                              }
+                            }}
+                            disabled={monitoringActive || formData.directoryToken === dir.token}
+                            className="text-xs py-0 h-6"
+                          >
+                            {formData.directoryToken === dir.token ? 'Activo' : 'Usar'}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              if (confirm(`¿Estás seguro de que quieres eliminar el directorio "${dir.path}" de la configuración?`)) {
+                                try {
+                                  await directoryApi.removeDirectory(dir.token);
+                                  // Si era el directorio activo, limpiarlo
+                                  if (formData.directoryToken === dir.token) {
+                                    tokenStorage.removeDirectoryToken();
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      directoryToken: '',
+                                      customLogPath: ''
+                                    }));
+                                    setDirectoryInfo(null);
+                                  }
+                                  // Recargar la lista de directorios
+                                  await loadAvailableDirectories();
+                                  setMessage({
+                                    type: 'success',
+                                    text: `Directorio eliminado: ${dir.path}`
+                                  });
+                                } catch (error) {
+                                  console.error('Error eliminando directorio:', error);
+                                  setMessage({
+                                    type: 'error',
+                                    text: 'Error al eliminar el directorio'
+                                  });
+                                }
+                              }
+                            }}
+                            disabled={monitoringActive}
+                            className="text-xs py-0 h-6 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          >
+                            Eliminar
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-sm text-gray-500">
+                    Estos son los directorios configurados en el servidor. Puedes seleccionar uno o configurar uno nuevo abajo.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="customLogPath">Directorio personalizado para esta sesión</Label>
                 <div className="flex space-x-2">
                   <Input
                     id="customLogPath"
                     value={formData.customLogPath}
-                    onChange={(e) => setFormData(prev => ({ ...prev, customLogPath: e.target.value }))}
-                    placeholder="Selecciona un directorio o escribe la ruta..."
+                    onChange={(e) => handleCustomPathChange(e.target.value)}
+                    placeholder={
+                      formData.directoryToken
+                        ? "Directorio configurado"
+                        : "Ej: /home/usuario/logs o C:\\Users\\usuario\\logs"
+                    }
                     className="flex-1"
-                    disabled={monitoringActive}
+                    disabled={monitoringActive || !!formData.directoryToken}
                   />
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={handleDirectorySelect}
-                    disabled={monitoringActive}
+                    onClick={handleAddDirectory}
+                    disabled={monitoringActive || !!formData.directoryToken || !formData.customLogPath.trim()}
                   >
-                    Examinar
+                    Añadir
                   </Button>
+                  {formData.directoryToken && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleClearCustomDirectory}
+                      disabled={monitoringActive}
+                      className="text-red-600 hover:text-red-700"
+                    >
+                      Limpiar
+                    </Button>
+                  )}
                 </div>
                 <p className="text-sm text-gray-500">
                   {monitoringActive
                     ? "Debes detener el servicio de monitoreo para cambiar el directorio de logs"
-                    : "Selecciona un directorio específico donde guardar los logs de esta sesión"}
+                    : formData.directoryToken
+                    ? "Directorio personalizado configurado. Usa el botón 'Limpiar' para cambiarlo."
+                    : "Ingresa la ruta completa del directorio donde guardar los logs (ej: /home/usuario/logs o C:\\Users\\usuario\\logs) y haz clic en 'Añadir' para configurarlo."}
                 </p>
+                {formData.directoryToken && directoryInfo && (
+                  <div className="text-xs text-green-600 bg-green-50 p-3 rounded border border-green-200">
+                    <div className="font-medium">✅ Directorio configurado correctamente</div>
+                    <div className="mt-1">
+                      <strong>Ruta:</strong> {directoryInfo.path}
+                    </div>
+                    <div>
+                      <strong>Existe:</strong> {directoryInfo.exists ? '✅ Sí' : '❌ No'}
+                    </div>
+                    <div>
+                      <strong>Permisos de escritura:</strong> {directoryInfo.isWritable ? '✅ Sí' : '❌ No'}
+                    </div>
+
+                    {/* Información del archivo de log */}
+                    <div className="mt-2 pt-2 border-t border-green-200">
+                      <div className="font-medium">📄 Archivo devpipe.log:</div>
+                      <div className="mt-1">
+                        <strong>Existe:</strong> {directoryInfo.logFile?.exists ? '✅ Sí' : '❌ No'}
+                      </div>
+                      {directoryInfo.logFile?.exists ? (
+                        <>
+                          <div>
+                            <strong>Tamaño:</strong> {(directoryInfo.logFile.size / 1024).toFixed(2)} KB
+                          </div>
+                          <div>
+                            <strong>Última modificación:</strong> {new Date(directoryInfo.logFile.lastModified).toLocaleString()}
+                          </div>
+                          <div className="text-green-500 text-xs mt-1">
+                            🎉 El archivo ya existe y contiene logs
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-blue-500 text-xs mt-1">
+                          💡 El archivo se creará cuando inicies el monitoreo y se reciba el primer log
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-gray-500 text-xs mt-2">
+                      Token: {formData.directoryToken.substring(0, 8)}...
+                    </div>
+                    <div className="mt-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={checkDirectoryStatus}
+                        className="text-xs py-0 h-6"
+                      >
+                        Verificar estado
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {formData.directoryToken && !directoryInfo && (
+                  <div className="text-xs text-orange-600 bg-orange-50 p-3 rounded border border-orange-200">
+                    <div className="font-medium">⚠️ Directorio configurado pero sin información</div>
+                    <div className="mt-1">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={checkDirectoryStatus}
+                        className="text-xs py-0 h-6"
+                      >
+                        Verificar estado
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

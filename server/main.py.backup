@@ -151,7 +151,7 @@ CORS(app)  # Habilitar CORS para desarrollo
 # Inicializar managers
 config_manager = ConfigManager()
 # directory_manager = DirectoryManager(config_manager.get_config().get('logDir', 'logs'))
-# log_manager ya fue inicializado en la línea 18
+log_manager = LogManager(base_dir=config_manager.get_config().get('logDir', 'logs'), directory_manager=directory_manager)
 
 # Registrar el blueprint de directorios
 app.register_blueprint(directory_routes)
