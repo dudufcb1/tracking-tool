@@ -1,37 +1,23 @@
 import { Menu, Sun, Moon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  NavigationMenu,
-  NavigationMenuItem,
-  NavigationMenuList,
-} from "@/components/ui/navigation-menu"
 
 interface NavbarProps {
   open: boolean;
   drawerWidth: number;
   onDrawerToggle: () => void;
-  onThemeToggle: () => void;
-  mode: 'light' | 'dark';
+  onThemeToggle?: () => void;
+  mode?: 'light' | 'dark';
 }
 
 export default function Navbar({
-  open,
-  drawerWidth,
   onDrawerToggle,
   onThemeToggle,
-  mode,
+  mode = 'light',
 }: NavbarProps) {
   return (
-    <NavigationMenu
-      className="fixed top-0 right-0 w-full z-50 bg-background border-b"
-      style={{
-        width: `calc(100% - ${open ? drawerWidth : 0}px)`,
-        marginLeft: open ? `${drawerWidth}px` : 0,
-        transition: 'width 225ms cubic-bezier(0.4, 0, 0.6, 1) 0ms, margin 225ms cubic-bezier(0.4, 0, 0.6, 1) 0ms',
-      }}
-    >
-      <NavigationMenuList className="container flex justify-between h-16 items-center">
-        <NavigationMenuItem>
+    <nav className="fixed top-0 left-0 md:left-60 right-0 z-40 bg-white border-b border-gray-200 h-16">
+      <div className="container flex justify-between h-16 items-center px-4">
+        <div>
           <Button
             variant="ghost"
             className="md:hidden"
@@ -39,20 +25,24 @@ export default function Navbar({
           >
             <Menu className="h-5 w-5" />
           </Button>
-        </NavigationMenuItem>
-        <NavigationMenuItem className="flex-1">
-          <h1 className="text-lg font-semibold">DevPipe Monitor</h1>
-        </NavigationMenuItem>
-        <NavigationMenuItem>
-          <Button
-            variant="ghost"
-            className="w-9 px-0"
-            onClick={onThemeToggle}
-          >
-            {mode === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-          </Button>
-        </NavigationMenuItem>
-      </NavigationMenuList>
-    </NavigationMenu>
+        </div>
+
+        <div className="flex-1 text-center md:text-left">
+          <h1 className="text-lg font-semibold text-gray-800">DevPipe Monitor</h1>
+        </div>
+
+        <div>
+          {onThemeToggle && (
+            <Button
+              variant="ghost"
+              className="w-9 px-0"
+              onClick={onThemeToggle}
+            >
+              {mode === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+            </Button>
+          )}
+        </div>
+      </div>
+    </nav>
   );
 }

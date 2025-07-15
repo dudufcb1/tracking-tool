@@ -1,5 +1,5 @@
-import { Box, CssBaseline, ThemeProvider, createTheme } from '@mui/material';
-import { ReactNode, useMemo, useState } from 'react';
+import { useState } from 'react';
+import type { ReactNode } from 'react';
 import Navbar from './Navbar';
 import Sidebar from './Sidebar';
 
@@ -10,27 +10,11 @@ interface MainLayoutProps {
 }
 
 export default function MainLayout({ children }: MainLayoutProps) {
-  const [mode, setMode] = useState<'light' | 'dark'>('dark');
-  const [open, setOpen] = useState(true);
-
-  const theme = useMemo(
-    () =>
-      createTheme({
-        palette: {
-          mode,
-          primary: {
-            main: '#1976d2',
-          },
-          secondary: {
-            main: '#dc004e',
-          },
-        },
-      }),
-    [mode]
-  );
+  const [mode, setMode] = useState<'light' | 'dark'>('light');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const handleDrawerToggle = () => {
-    setOpen(!open);
+    setSidebarOpen(!sidebarOpen);
   };
 
   const toggleColorMode = () => {
@@ -38,34 +22,29 @@ export default function MainLayout({ children }: MainLayoutProps) {
   };
 
   return (
-    <ThemeProvider theme={theme}>
-      <Box sx={{ display: 'flex' }}>
-        <CssBaseline />
-        <Navbar
-          open={open}
-          drawerWidth={drawerWidth}
-          onDrawerToggle={handleDrawerToggle}
-          onThemeToggle={toggleColorMode}
-          mode={mode}
-        />
-        <Sidebar
-          open={open}
-          drawerWidth={drawerWidth}
-          onDrawerToggle={handleDrawerToggle}
-        />
-        <Box
-          component="main"
-          sx={{
-            flexGrow: 1,
-            p: 3,
-            width: { sm: `calc(100% - ${drawerWidth}px)` },
-            ml: { sm: `${drawerWidth}px` },
-            mt: '64px',
-          }}
-        >
+    <div className={`min-h-screen bg-gray-50 ${mode === 'dark' ? 'dark' : ''}`}>
+      {/* Navbar fijo en la parte superior */}
+      <Navbar
+        open={sidebarOpen}
+        drawerWidth={drawerWidth}
+        onDrawerToggle={handleDrawerToggle}
+        onThemeToggle={toggleColorMode}
+        mode={mode}
+      />
+
+      {/* Sidebar */}
+      <Sidebar
+        open={sidebarOpen}
+        drawerWidth={drawerWidth}
+        onDrawerToggle={handleDrawerToggle}
+      />
+
+      {/* Contenido principal con margen apropiado */}
+      <main className="pt-16 md:ml-60 transition-all duration-300 min-h-screen">
+        <div className="p-6">
           {children}
-        </Box>
-      </Box>
-    </ThemeProvider>
+        </div>
+      </main>
+    </div>
   );
 }

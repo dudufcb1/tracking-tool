@@ -3,31 +3,62 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { configApi } from '@/lib/api';
+import { configApi, type ConfigData } from '@/lib/api';
 import { Separator } from '@/components/ui/separator';
 
 interface ConfigFormData {
-  logPath: string;
-  maxFileSize: number;
-  maxBufferSize: number;
-  rotationCount: number;
+  maxFileSize: number;    // KB
+  maxLogs: number;
+  urlFilters: string;     // Como string para el input, se convertirá a array
+  port: number;
+  logDir: string;
+  monitoringEnabled: boolean;
+  monitoringInterval: number;
 }
 
 export default function Config() {
   const [formData, setFormData] = useState<ConfigFormData>({
-    logPath: '',
-    maxFileSize: 1024 * 1024, // 1MB por defecto
-    maxBufferSize: 1000,      // 1000 líneas por defecto
-    rotationCount: 5          // 5 archivos de respaldo por defecto
+    maxFileSize: 50,          // KB
+    maxLogs: 10,
+    urlFilters: '',           // Como string, se convertirá a array
+    port: 7845,
+    logDir: 'logs',
+    monitoringEnabled: false,
+    monitoringInterval: 1000
   });
+
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+  const [serverInfo, setServerInfo] = useState<{ isActive: boolean, fileInfo?: any } | null>(null);
 
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const { data } = await configApi.getConfig();
-        setFormData(data);
+        setLoading(true);
+        const response = await configApi.getConfig();
+
+        if (response.status === 'success' && response.data) {
+          const config = response.data;
+          setFormData({
+            maxFileSize: config.maxFileSize,
+            maxLogs: config.maxLogs,
+            urlFilters: config.urlFilters.join(', '), // Convertir array a string
+            port: config.port,
+            logDir: config.logDir,
+            monitoringEnabled: config.monitoring.enabled,
+            monitoringInterval: config.monitoring.intervalMs
+          });
+
+          setServerInfo({
+            isActive: config.isActive || false,
+            fileInfo: config.fileInfo
+          });
+        }
       } catch (error) {
         console.error('Error al cargar la configuración:', error);
+        setMessage({ type: 'error', text: 'Error al cargar la configuración del servidor' });
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -36,67 +67,194 @@ export default function Config() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     try {
-      await configApi.updateConfig(formData);
+      setLoading(true);
+      setMessage(null);
+
+      // Convertir formData al formato esperado por el servidor
+      const configToSend = {
+        maxFileSize: formData.maxFileSize,
+        maxLogs: formData.maxLogs,
+        urlFilters: formData.urlFilters.split(',').map(f => f.trim()).filter(f => f.length > 0),
+        port: formData.port,
+        logDir: formData.logDir,
+        monitoring: {
+          enabled: formData.monitoringEnabled,
+          intervalMs: formData.monitoringInterval
+        }
+      };
+
+      const response = await configApi.updateConfig(configToSend);
+
+      if (response.status === 'success') {
+        setMessage({ type: 'success', text: 'Configuración guardada correctamente' });
+      } else {
+        setMessage({ type: 'error', text: response.message || 'Error al guardar la configuración' });
+      }
     } catch (error) {
       console.error('Error al guardar la configuración:', error);
+      setMessage({ type: 'error', text: 'Error de conexión con el servidor' });
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="p-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Configuración</CardTitle>
-          <CardDescription>
-            Ajusta la configuración del monitor de logs
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="logPath">Ruta del archivo de log</Label>
-            <Input
-              id="logPath"
-              value={formData.logPath}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData(prev => ({ ...prev, logPath: e.target.value }))}
-              placeholder="/ruta/al/archivo.log"
-            />
-          </div>
-          <Separator />
-          <div className="space-y-2">
-            <Label htmlFor="maxFileSize">Tamaño máximo del archivo (bytes)</Label>
-            <Input
-              id="maxFileSize"
-              type="number"
-              value={formData.maxFileSize}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData(prev => ({ ...prev, maxFileSize: parseInt(e.target.value) }))}
-            />
-          </div>
-          <Separator />
-          <div className="space-y-2">
-            <Label htmlFor="maxBufferSize">Tamaño máximo del buffer (líneas)</Label>
-            <Input
-              id="maxBufferSize"
-              type="number"
-              value={formData.maxBufferSize}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData(prev => ({ ...prev, maxBufferSize: parseInt(e.target.value) }))}
-            />
-          </div>
-          <Separator />
-          <div className="space-y-2">
-            <Label htmlFor="rotationCount">Número de archivos de respaldo</Label>
-            <Input
-              id="rotationCount"
-              type="number"
-              value={formData.rotationCount}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFormData(prev => ({ ...prev, rotationCount: parseInt(e.target.value) }))}
-            />
-          </div>
-          <div className="pt-4">
-            <Button type="submit">Guardar cambios</Button>
-          </div>
-        </CardContent>
-      </Card>
-    </form>
+    <div className="space-y-6">
+      {/* Estado del servidor */}
+      {serverInfo && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Estado del Servidor</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center space-x-2">
+              <div className={`w-3 h-3 rounded-full ${serverInfo.isActive ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <span>{serverInfo.isActive ? 'Monitoreo Activo' : 'Monitoreo Inactivo'}</span>
+            </div>
+            {serverInfo.fileInfo && (
+              <div className="mt-2 text-sm text-gray-600">
+                <p>Archivo: {serverInfo.fileInfo.path}</p>
+                <p>Tamaño: {(serverInfo.fileInfo.size / 1024).toFixed(2)} KB</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Mensajes */}
+      {message && (
+        <Card className={message.type === 'error' ? 'border-red-500' : 'border-green-500'}>
+          <CardContent className="pt-6">
+            <p className={message.type === 'error' ? 'text-red-600' : 'text-green-600'}>
+              {message.text}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Formulario de configuración */}
+      <form onSubmit={handleSubmit}>
+        <Card>
+          <CardHeader>
+            <CardTitle>Configuración del Sistema</CardTitle>
+            <CardDescription>
+              Ajusta la configuración del monitor de logs DevPipe
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Configuración de archivos */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Archivos y Logs</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="logDir">Directorio de logs</Label>
+                <Input
+                  id="logDir"
+                  value={formData.logDir}
+                  onChange={(e) => setFormData(prev => ({ ...prev, logDir: e.target.value }))}
+                  placeholder="logs"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxFileSize">Tamaño máximo del archivo (KB)</Label>
+                <Input
+                  id="maxFileSize"
+                  type="number"
+                  value={formData.maxFileSize}
+                  onChange={(e) => setFormData(prev => ({ ...prev, maxFileSize: parseInt(e.target.value) || 0 }))}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="maxLogs">Número máximo de logs a mostrar</Label>
+                <Input
+                  id="maxLogs"
+                  type="number"
+                  value={formData.maxLogs}
+                  onChange={(e) => setFormData(prev => ({ ...prev, maxLogs: parseInt(e.target.value) || 0 }))}
+                />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Configuración de red */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Red y Puerto</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="port">Puerto del servidor</Label>
+                <Input
+                  id="port"
+                  type="number"
+                  value={formData.port}
+                  onChange={(e) => setFormData(prev => ({ ...prev, port: parseInt(e.target.value) || 7845 }))}
+                />
+                <p className="text-sm text-gray-500">
+                  Puerto donde el servidor DevPipe escuchará las conexiones
+                </p>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Configuración de filtros */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Filtros</h3>
+
+              <div className="space-y-2">
+                <Label htmlFor="urlFilters">Filtros de URL (separados por comas)</Label>
+                <Input
+                  id="urlFilters"
+                  value={formData.urlFilters}
+                  onChange={(e) => setFormData(prev => ({ ...prev, urlFilters: e.target.value }))}
+                  placeholder="localhost, 127.0.0.1, example.com"
+                />
+                <p className="text-sm text-gray-500">
+                  URLs que serán filtradas del monitoreo
+                </p>
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* Configuración de monitoreo */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-medium">Monitoreo</h3>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="monitoringEnabled"
+                  checked={formData.monitoringEnabled}
+                  onChange={(e) => setFormData(prev => ({ ...prev, monitoringEnabled: e.target.checked }))}
+                  className="rounded"
+                />
+                <Label htmlFor="monitoringEnabled">Habilitar monitoreo automático</Label>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="monitoringInterval">Intervalo de monitoreo (ms)</Label>
+                <Input
+                  id="monitoringInterval"
+                  type="number"
+                  value={formData.monitoringInterval}
+                  onChange={(e) => setFormData(prev => ({ ...prev, monitoringInterval: parseInt(e.target.value) || 1000 }))}
+                />
+              </div>
+            </div>
+
+            <div className="pt-4">
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Guardando...' : 'Guardar Configuración'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </form>
+    </div>
   );
 }

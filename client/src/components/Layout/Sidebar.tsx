@@ -1,16 +1,7 @@
-import {
-  Box,
-  Drawer,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  useTheme,
-} from '@mui/material';
-import HomeIcon from '@mui/icons-material/Home';
-import SettingsIcon from '@mui/icons-material/Settings';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { MonitorIcon, SettingsIcon } from 'lucide-react';
 
 interface SidebarProps {
   open: boolean;
@@ -23,66 +14,76 @@ export default function Sidebar({
   drawerWidth,
   onDrawerToggle,
 }: SidebarProps) {
-  const theme = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const menuItems = [
-    { text: 'Monitor', icon: <HomeIcon />, path: '/' },
-    { text: 'Configuration', icon: <SettingsIcon />, path: '/config' },
+    { text: 'Monitor', icon: MonitorIcon, path: '/' },
+    { text: 'Configuración', icon: SettingsIcon, path: '/config' },
   ];
 
-  const drawer = (
-    <Box>
-      <List>
-        {menuItems.map((item) => (
-          <ListItem key={item.text} disablePadding>
-            <ListItemButton onClick={() => navigate(item.path)}>
-              <ListItemIcon>{item.icon}</ListItemIcon>
-              <ListItemText primary={item.text} />
-            </ListItemButton>
-          </ListItem>
-        ))}
-      </List>
-    </Box>
+  const sidebarContent = (
+    <div className="p-4 space-y-2">
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold text-gray-800">DevPipe</h2>
+        <p className="text-sm text-gray-600">Monitor de Logs</p>
+      </div>
+
+      <nav className="space-y-1">
+        {menuItems.map((item) => {
+          const Icon = item.icon;
+          const isActive = location.pathname === item.path;
+
+          return (
+            <Button
+              key={item.text}
+              variant={isActive ? "default" : "ghost"}
+              className="w-full justify-start"
+              onClick={() => {
+                navigate(item.path);
+                onDrawerToggle();
+              }}
+            >
+              <Icon className="h-4 w-4 mr-2" />
+              {item.text}
+            </Button>
+          );
+        })}
+      </nav>
+    </div>
   );
 
   return (
-    <Box
-      component="nav"
-      sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
-    >
-      <Drawer
-        variant="temporary"
-        open={open}
-        onClose={onDrawerToggle}
-        ModalProps={{
-          keepMounted: true, // Better open performance on mobile.
-        }}
-        sx={{
-          display: { xs: 'block', sm: 'none' },
-          '& .MuiDrawer-paper': {
-            boxSizing: 'border-box',
-            width: drawerWidth,
-            backgroundColor: theme.palette.background.default,
-          },
-        }}
+    <>
+      {/* Mobile sidebar overlay */}
+      {open && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 md:hidden"
+          onClick={onDrawerToggle}
+        />
+      )}
+
+      {/* Mobile sidebar */}
+      <div className={`
+        fixed top-0 left-0 h-full bg-white z-50 transform transition-transform duration-300 ease-in-out md:hidden
+        ${open ? 'translate-x-0' : '-translate-x-full'}
+      `} style={{ width: drawerWidth }}>
+        <Card className="h-full rounded-none border-r">
+          <CardContent className="p-0">
+            {sidebarContent}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Desktop sidebar - fijo en la izquierda */}
+      <div
+        className="hidden md:block fixed top-0 left-0 h-full z-30 bg-white border-r border-gray-200"
+        style={{ width: drawerWidth }}
       >
-        {drawer}
-      </Drawer>
-      <Drawer
-        variant="permanent"
-        sx={{
-          display: { xs: 'none', sm: 'block' },
-          '& .MuiDrawer-paper': {
-            boxSizing: 'border-box',
-            width: drawerWidth,
-            backgroundColor: theme.palette.background.default,
-          },
-        }}
-        open
-      >
-        {drawer}
-      </Drawer>
-    </Box>
+        <div className="h-full overflow-y-auto">
+          {sidebarContent}
+        </div>
+      </div>
+    </>
   );
 }
