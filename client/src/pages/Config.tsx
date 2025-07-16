@@ -274,7 +274,7 @@ export default function Config() {
 
     // Limpiar intervalo al desmontar
     return () => clearInterval(intervalId);
-  }, [showError]);
+  }, []); // Remover showError de las dependencias para evitar loop infinito
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
