@@ -157,8 +157,7 @@ CORS(app)  # Habilitar CORS para desarrollo
 app.register_blueprint(directory_routes)
 file_watcher = FileWatcher()
 
-# Variable global para almacenar la ruta del archivo externo
-external_log_path = None
+# Variable global eliminada - ahora se usa config_manager para persistencia
 
 def on_external_log(file_path: str) -> None:
     """Callback para cuando hay cambios en un archivo externo"""
@@ -370,7 +369,6 @@ def update_config():
 @app.route('/api/external-log/path', methods=['POST'])
 def set_external_log_path_config():
     """Establece la ruta del archivo de log externo"""
-    # Usar config_manager en lugar de variable global
     try:
         data = request.get_json()
         if not data or 'path' not in data:
@@ -384,10 +382,16 @@ def set_external_log_path_config():
                 "message": "La ruta debe ser absoluta"
             }), 400
 
-        external_log_path = path
-        return jsonify({
-            "message": f"Ruta establecida: {path}"
-        })
+        # Usar config_manager para persistir la configuración
+        success = config_manager.set_external_log_path(path)
+        if success:
+            return jsonify({
+                "message": f"Ruta establecida: {path}"
+            })
+        else:
+            return jsonify({
+                "message": "Error al guardar la configuración"
+            }), 500
     except Exception as e:
         return jsonify({
             "message": f"Error: {str(e)}"
@@ -396,8 +400,10 @@ def set_external_log_path_config():
 @app.route('/api/external-log/exists', methods=['GET'])
 def check_external_log_exists():
     """Verifica si el archivo de log externo existe"""
-    # Usar config_manager en lugar de variable global
     try:
+        # Usar config_manager para obtener la ruta persistente
+        external_log_path = config_manager.get_external_log_path()
+
         if not external_log_path:
             return jsonify({
                 "exists": False,
@@ -419,8 +425,10 @@ def check_external_log_exists():
 @app.route('/api/external-log/stats', methods=['GET'])
 def get_external_log_stats():
     """Obtiene estadísticas del archivo de log externo"""
-    # Usar config_manager en lugar de variable global
     try:
+        # Usar config_manager para obtener la ruta persistente
+        external_log_path = config_manager.get_external_log_path()
+
         if not external_log_path:
             return jsonify({
                 "message": "No se ha establecido una ruta de archivo"
@@ -444,8 +452,10 @@ def get_external_log_stats():
 @app.route('/api/external-log/content', methods=['GET'])
 def get_external_log_content():
     """Obtiene todo el contenido del archivo de log externo"""
-    # Usar config_manager en lugar de variable global
     try:
+        # Usar config_manager para obtener la ruta persistente
+        external_log_path = config_manager.get_external_log_path()
+
         if not external_log_path:
             return jsonify({
                 "message": "No se ha establecido una ruta de archivo"
@@ -471,8 +481,10 @@ def get_external_log_content():
 @app.route('/api/external-log/lines/<int:n>', methods=['GET'])
 def get_external_log_last_n_lines(n):
     """Obtiene las últimas N líneas del archivo de log externo"""
-    # Usar config_manager en lugar de variable global
     try:
+        # Usar config_manager para obtener la ruta persistente
+        external_log_path = config_manager.get_external_log_path()
+
         if not external_log_path:
             return jsonify({
                 "message": "No se ha establecido una ruta de archivo"
@@ -508,8 +520,10 @@ def get_external_log_last_n_lines(n):
 @app.route('/api/external-log/clear', methods=['DELETE'])
 def clear_external_log():
     """Borra el contenido del archivo de log externo"""
-    # Usar config_manager en lugar de variable global
     try:
+        # Usar config_manager para obtener la ruta persistente
+        external_log_path = config_manager.get_external_log_path()
+
         if not external_log_path:
             return jsonify({
                 "message": "No se ha establecido una ruta de archivo"

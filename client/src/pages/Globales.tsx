@@ -21,7 +21,7 @@ import {
   DownloadIcon,
   EyeIcon
 } from "lucide-react"
-import { externalLogApi } from "@/lib/api"
+import { externalLogApi, mergeConfigApi } from "@/lib/api"
 import { toast } from "sonner"
 
 interface FileStats {
@@ -61,10 +61,14 @@ export default function Globales() {
 
     setLoading(true)
     try {
-      await externalLogApi.setPath(filePath.trim())
-      toast.success("Ruta del archivo establecida correctamente")
-      await checkFileExists()
-      await getFileStats()
+      const response = await mergeConfigApi.setExternalLogPath(filePath.trim())
+      if (response.status === 'success') {
+        toast.success("Ruta del archivo establecida correctamente")
+        await checkFileExists()
+        await getFileStats()
+      } else {
+        toast.error("Error al establecer la ruta del archivo")
+      }
     } catch (error) {
       console.error("Error setting file path:", error)
       toast.error("Error al establecer la ruta del archivo")
@@ -77,14 +81,20 @@ export default function Globales() {
   const checkFileExists = async () => {
     setLoading(true)
     try {
-      const response: FileExistence = await externalLogApi.checkExists()
-      setFileExists(response.exists)
-      if (response.path) {
-        setFilePath(response.path)
+      const response = await mergeConfigApi.getExternalLogPath()
+      if (response.status === 'success' && response.data) {
+        setFileExists(response.data.exists)
+        if (response.data.path) {
+          setFilePath(response.data.path)
+        }
+      } else {
+        setFileExists(false)
+        setFilePath("")
       }
     } catch (error: any) {
       console.error("Error checking file existence:", error)
       setFileExists(false)
+      setFilePath("")
       // Solo mostrar error si es un error real, no por falta de configuración
       if (error?.response?.status !== 400) {
         toast.error("Error al verificar la existencia del archivo")
