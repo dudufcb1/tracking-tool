@@ -256,7 +256,7 @@ export default function Monitor() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-[500px] overflow-auto rounded-md border bg-gray-50 p-4">
+          <div className="h-[500px] overflow-auto rounded-md border bg-muted p-4">
             {filteredLogs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-gray-500">
                 {logs.length === 0 ? 'No hay logs disponibles' : 'No hay logs que coincidan con el filtro'}

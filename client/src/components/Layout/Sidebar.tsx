@@ -7,12 +7,14 @@ interface SidebarProps {
   open: boolean;
   drawerWidth: number;
   onDrawerToggle: () => void;
+  mode?: 'light' | 'dark';
 }
 
 export default function Sidebar({
   open,
   drawerWidth,
   onDrawerToggle,
+  mode = 'light',
 }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -27,8 +29,8 @@ export default function Sidebar({
   const sidebarContent = (
     <div className="p-4 space-y-2">
       <div className="mb-6">
-        <h2 className="text-lg font-semibold text-gray-800">DevPipe</h2>
-        <p className="text-sm text-gray-600">Monitor de Logs</p>
+        <h2 className={`text-lg font-semibold ${mode === 'dark' ? 'text-white' : 'text-gray-800'}`}>DevPipe</h2>
+        <p className={`text-sm ${mode === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>Monitor de Logs</p>
       </div>
 
       <nav className="space-y-1">
@@ -67,10 +69,11 @@ export default function Sidebar({
 
       {/* Mobile sidebar */}
       <div className={`
-        fixed top-0 left-0 h-full bg-white z-50 transform transition-transform duration-300 ease-in-out md:hidden
+        fixed top-0 left-0 h-full z-50 transform transition-transform duration-300 ease-in-out md:hidden
         ${open ? 'translate-x-0' : '-translate-x-full'}
+        ${mode === 'dark' ? 'bg-gray-800' : 'bg-white'}
       `} style={{ width: drawerWidth }}>
-        <Card className="h-full rounded-none border-r">
+        <Card className={`h-full rounded-none border-r ${mode === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
           <CardContent className="p-0">
             {sidebarContent}
           </CardContent>
@@ -79,7 +82,7 @@ export default function Sidebar({
 
       {/* Desktop sidebar - fijo en la izquierda */}
       <div
-        className="hidden md:block fixed top-0 left-0 h-full z-30 bg-white border-r border-gray-200"
+        className={`hidden md:block fixed top-0 left-0 h-full z-30 border-r ${mode === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}
         style={{ width: drawerWidth }}
       >
         <div className="h-full overflow-y-auto">

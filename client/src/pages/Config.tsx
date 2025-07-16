@@ -347,7 +347,7 @@ export default function Config() {
               <span className="font-medium">{serverInfo.isActive ? 'Monitoreo Activo' : 'Monitoreo Inactivo'}</span>
             </div>
             {serverInfo.fileInfo && (
-              <div className="mt-3 text-sm border rounded p-3 bg-gray-50">
+              <div className="mt-3 text-sm border rounded p-3 bg-muted">
                 <p className="font-medium">Información del archivo de log:</p>
                 <p className="mt-1"><strong>Ruta:</strong> {serverInfo.fileInfo.path}</p>
                 <p><strong>Tamaño:</strong> {(serverInfo.fileInfo.size / 1024).toFixed(2)} KB</p>
@@ -426,7 +426,7 @@ export default function Config() {
               {availableDirectories.length > 0 && (
                 <div className="space-y-2">
                   <Label>Directorios configurados en el servidor</Label>
-                  <div className="border rounded p-3 bg-gray-50 max-h-32 overflow-y-auto">
+                  <div className="border rounded p-3 bg-muted max-h-32 overflow-y-auto">
                     {availableDirectories.map((dir) => (
                       <div key={dir.token} className="flex items-center justify-between py-1 text-sm">
                         <span className="font-mono text-xs">{dir.path}</span>

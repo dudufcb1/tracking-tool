@@ -190,6 +190,37 @@ export default function MergeLogs() {
     }
   }
 
+  // Función para crear archivo merged
+  const createMergedFile = async () => {
+    setLoading(true)
+    try {
+      const options: any = {
+        sort_by_time: sortByTime
+      }
+
+      if (internalLines && internalLines !== "") {
+        options.internal_limit = parseInt(internalLines)
+      }
+
+      if (externalLines && externalLines !== "") {
+        options.external_limit = parseInt(externalLines)
+      }
+
+      const response = await mergeLogsApi.createMergedFile(options)
+      if (response.status === 'success' && response.data) {
+        toast.success(`Archivo merged creado correctamente en: ${response.data.file_path}`)
+        await loadStats() // Recargar estadísticas para mostrar el archivo creado
+      } else {
+        toast.error("Error al crear el archivo merged")
+      }
+    } catch (error) {
+      console.error("Error creating merged file:", error)
+      toast.error("Error al crear el archivo merged")
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Cargar estadísticas y rutas al montar el componente
   useEffect(() => {
     loadStats()
@@ -427,6 +458,16 @@ export default function MergeLogs() {
             >
               <CopyIcon className="h-4 w-4 mr-2" />
               Exportar al Portapapeles
+            </Button>
+
+            <Button
+              onClick={createMergedFile}
+              disabled={loading}
+              variant="outline"
+              className="flex-1 min-w-[200px]"
+            >
+              <FileTextIcon className="h-4 w-4 mr-2" />
+              Crear Archivo Merged
             </Button>
 
             <Button

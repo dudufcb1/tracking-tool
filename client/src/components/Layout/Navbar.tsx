@@ -1,4 +1,4 @@
-import { Menu, Sun, Moon } from "lucide-react"
+import { Menu, Sun, Moon, PlayIcon, SquareIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 interface NavbarProps {
@@ -7,15 +7,23 @@ interface NavbarProps {
   onDrawerToggle: () => void;
   onThemeToggle?: () => void;
   mode?: 'light' | 'dark';
+  onStartMonitoring?: () => void;
+  onStopMonitoring?: () => void;
+  monitoringActive?: boolean;
+  monitoringLoading?: boolean;
 }
 
 export default function Navbar({
   onDrawerToggle,
   onThemeToggle,
   mode = 'light',
+  onStartMonitoring,
+  onStopMonitoring,
+  monitoringActive = false,
+  monitoringLoading = false,
 }: NavbarProps) {
   return (
-    <nav className="fixed top-0 left-0 md:left-60 right-0 z-40 bg-white border-b border-gray-200 h-16">
+    <nav className={`fixed top-0 left-0 md:left-60 right-0 z-40 h-16 border-b transition-colors duration-300 ${mode === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
       <div className="container flex justify-between h-16 items-center px-4">
         <div>
           <Button
@@ -28,10 +36,33 @@ export default function Navbar({
         </div>
 
         <div className="flex-1 text-center md:text-left">
-          <h1 className="text-lg font-semibold text-gray-800">DevPipe Monitor</h1>
+          <h1 className={`text-lg font-semibold transition-colors duration-300 ${mode === 'dark' ? 'text-white' : 'text-gray-800'}`}>DevPipe Monitor</h1>
         </div>
 
-        <div>
+        <div className="flex items-center space-x-2">
+          {/* Botones de monitoreo */}
+          {onStartMonitoring && onStopMonitoring && (
+            <>
+              <Button
+                variant={monitoringActive ? "secondary" : "default"}
+                size="sm"
+                onClick={onStartMonitoring}
+                disabled={monitoringLoading || monitoringActive}
+              >
+                <PlayIcon className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={!monitoringActive ? "secondary" : "destructive"}
+                size="sm"
+                onClick={onStopMonitoring}
+                disabled={monitoringLoading || !monitoringActive}
+              >
+                <SquareIcon className="h-4 w-4" />
+              </Button>
+            </>
+          )}
+
+          {/* Botón de tema */}
           {onThemeToggle && (
             <Button
               variant="ghost"
