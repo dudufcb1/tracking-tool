@@ -1,7 +1,7 @@
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { MonitorIcon, SettingsIcon } from 'lucide-react';
+import { MonitorIcon, SettingsIcon, GlobeIcon } from 'lucide-react';
 
 interface SidebarProps {
   open: boolean;
@@ -20,6 +20,7 @@ export default function Sidebar({
   const menuItems = [
     { text: 'Monitor', icon: MonitorIcon, path: '/' },
     { text: 'Configuración', icon: SettingsIcon, path: '/config' },
+    { text: 'Globales', icon: GlobeIcon, path: '/globales' },
   ];
 
   const sidebarContent = (
