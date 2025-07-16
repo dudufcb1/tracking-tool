@@ -6,6 +6,8 @@ import { Label } from "@/components/ui/label"
 import { configApi, monitoringApi, directoryApi, tokenStorage } from '@/lib/api';
 import type { DirectoryInfo } from '@/lib/api';
 import { Separator } from '@/components/ui/separator';
+import { useNotifications } from '@/hooks/useNotifications';
+import { useConfirmDialog } from '@/hooks/useConfirmDialog';
 
 interface ConfigFormData {
   maxFileSize: number;    // KB
@@ -32,6 +34,9 @@ interface ServerInfo {
 }
 
 export default function Config() {
+  const { showSuccess, showError, showWarning, showInfo } = useNotifications();
+  const { showConfirm, ConfirmDialog } = useConfirmDialog();
+
   const [formData, setFormData] = useState<ConfigFormData>({
     maxFileSize: 50,          // KB
     maxLogs: 10,
@@ -45,7 +50,6 @@ export default function Config() {
   });
 
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [monitoringActive, setMonitoringActive] = useState(false);
   const [directoryInfo, setDirectoryInfo] = useState<DirectoryInfo | null>(null);
@@ -62,7 +66,6 @@ export default function Config() {
       if (formData.directoryToken) {
         tokenStorage.removeDirectoryToken();
         setFormData(prev => ({ ...prev, directoryToken: '' }));
-        setMessage(null);
       }
     }
   };
@@ -72,10 +75,7 @@ export default function Config() {
     const trimmedPath = formData.customLogPath.trim();
 
     if (!trimmedPath) {
-      setMessage({
-        type: 'error',
-        text: 'Por favor ingresa una ruta de directorio'
-      });
+      showError('Por favor ingresa una ruta de directorio');
       return;
     }
 
@@ -83,15 +83,14 @@ export default function Config() {
     const isValidPath = trimmedPath.startsWith('/') || /^[A-Za-z]:\\/.test(trimmedPath);
 
     if (!isValidPath) {
-      setMessage({
-        type: 'error',
-        text: 'Por favor ingresa una ruta completa válida (ej: /home/usuario/logs o C:\\Users\\usuario\\logs)'
-      });
+      showError(
+        'Ruta inválida',
+        'Por favor ingresa una ruta completa válida (ej: /home/usuario/logs o C:\\Users\\usuario\\logs)'
+      );
       return;
     }
 
     try {
-      setMessage(null);
       console.log('Intentando añadir directorio:', trimmedPath);
 
       const response = await directoryApi.saveDirectory(trimmedPath);
@@ -106,25 +105,22 @@ export default function Config() {
           customLogPath: info.path // Actualizar el campo visual con la ruta real
         }));
         setDirectoryInfo(info);
-        setMessage({
-          type: 'success',
-          text: `Directorio configurado exitosamente: ${info.path}`
-        });
+        showSuccess(
+          'Directorio configurado exitosamente',
+          `Ruta: ${info.path}`
+        );
 
         // Recargar la lista de directorios disponibles
         loadAvailableDirectories();
       } else {
-        setMessage({
-          type: 'error',
-          text: response.message || 'Error al configurar el directorio'
-        });
+        showError('Error al configurar el directorio', response.message);
       }
     } catch (error) {
       console.error('Error creating token for manual path:', error);
-      setMessage({
-        type: 'error',
-        text: 'Error al comunicarse con el servidor. Verifica que el directorio existe y tienes permisos.'
-      });
+      showError(
+        'Error al comunicarse con el servidor',
+        'Verifica que el directorio existe y tienes permisos.'
+      );
     }
   };
 
@@ -141,10 +137,10 @@ export default function Config() {
         directoryToken: ''
       }));
       setDirectoryInfo(null);
-      setMessage({ type: 'success', text: 'Directorio personalizado eliminado' });
+      showSuccess('Directorio personalizado eliminado');
     } catch (error) {
       console.error('Error clearing directory:', error);
-      setMessage({ type: 'error', text: 'Error al limpiar el directorio' });
+      showError('Error al limpiar el directorio');
     }
   };
 
@@ -162,22 +158,13 @@ export default function Config() {
           ...prev,
           customLogPath: response.data?.info.path || ''
         }));
-        setMessage({
-          type: 'success',
-          text: `Estado del directorio actualizado: ${response.data.info.path}`
-        });
+        showInfo(`Estado del directorio actualizado: ${response.data.info.path}`);
       } else {
-        setMessage({
-          type: 'error',
-          text: 'No se pudo obtener información del directorio'
-        });
+        showError('No se pudo obtener información del directorio');
       }
     } catch (error) {
       console.error('Error checking directory status:', error);
-      setMessage({
-        type: 'error',
-        text: 'Error al verificar el estado del directorio'
-      });
+      showError('Error al verificar el estado del directorio');
     }
   };
 
@@ -258,7 +245,7 @@ export default function Config() {
         }
       } catch (error) {
         console.error('Error al cargar la configuración:', error);
-        setMessage({ type: 'error', text: 'Error al cargar la configuración del servidor' });
+        showError('Error al cargar la configuración del servidor');
       } finally {
         setLoading(false);
       }
@@ -284,7 +271,6 @@ export default function Config() {
 
     try {
       setLoading(true);
-      setMessage(null);
 
       // Convertir formData al formato esperado por el servidor
       const configToSend = {
@@ -303,13 +289,22 @@ export default function Config() {
       const response = await configApi.updateConfig(configToSend);
 
       if (response.status === 'success') {
-        setMessage({ type: 'success', text: 'Configuración guardada correctamente' });
+        showSuccess('Configuración guardada correctamente');
       } else {
-        setMessage({ type: 'error', text: response.message || 'Error al guardar la configuración' });
+        showError('Error al guardar la configuración', response.message);
       }
     } catch (error) {
       console.error('Error al guardar la configuración:', error);
-      setMessage({ type: 'error', text: 'Error de conexión con el servidor' });
+
+      // Verificar si es el error específico de monitoreo activo
+      if (error instanceof Error && 'response' in error && (error as any).response?.status === 400) {
+        showWarning(
+          'No se puede cambiar la configuración',
+          'El monitoreo está activo. Detén el monitoreo antes de cambiar la configuración del directorio.'
+        );
+      } else {
+        showError('Error de conexión con el servidor');
+      }
     } finally {
       setLoading(false);
     }
@@ -353,16 +348,7 @@ export default function Config() {
         </Card>
       )}
 
-      {/* Mensajes */}
-      {message && (
-        <Card className={message.type === 'error' ? 'border-red-500' : 'border-green-500'}>
-          <CardContent className="pt-6">
-            <p className={message.type === 'error' ? 'text-red-600' : 'text-green-600'}>
-              {message.text}
-            </p>
-          </CardContent>
-        </Card>
-      )}
+
 
       {/* Estado del servicio */}
       <Card>
@@ -451,16 +437,13 @@ export default function Config() {
                                   });
                                 }
 
-                                setMessage({
-                                  type: 'success',
-                                  text: `Directorio seleccionado y configurado: ${dir.path}`
-                                });
+                                showSuccess(
+                                  'Directorio seleccionado y configurado',
+                                  `Ruta: ${dir.path}`
+                                );
                               } catch (error) {
                                 console.error('Error configurando directorio:', error);
-                                setMessage({
-                                  type: 'error',
-                                  text: 'Error al configurar el directorio en el servidor'
-                                });
+                                showError('Error al configurar el directorio en el servidor');
                               }
                             }}
                             disabled={monitoringActive || formData.directoryToken === dir.token}
@@ -473,7 +456,16 @@ export default function Config() {
                             variant="outline"
                             size="sm"
                             onClick={async () => {
-                              if (confirm(`¿Estás seguro de que quieres eliminar el directorio "${dir.path}" de la configuración?`)) {
+                              const confirmed = await showConfirm({
+                                title: 'Eliminar directorio',
+                                description: `¿Estás seguro de que quieres eliminar el directorio "${dir.path}" de la configuración? Esta acción no se puede deshacer.`,
+                                confirmText: 'Eliminar',
+                                cancelText: 'Cancelar',
+                                variant: 'destructive',
+                                icon: 'delete'
+                              });
+
+                              if (confirmed) {
                                 try {
                                   await directoryApi.removeDirectory(dir.token);
                                   // Si era el directorio activo, limpiarlo
@@ -488,16 +480,10 @@ export default function Config() {
                                   }
                                   // Recargar la lista de directorios
                                   await loadAvailableDirectories();
-                                  setMessage({
-                                    type: 'success',
-                                    text: `Directorio eliminado: ${dir.path}`
-                                  });
+                                  showSuccess(`Directorio eliminado: ${dir.path}`);
                                 } catch (error) {
                                   console.error('Error eliminando directorio:', error);
-                                  setMessage({
-                                    type: 'error',
-                                    text: 'Error al eliminar el directorio'
-                                  });
+                                  showError('Error al eliminar el directorio');
                                 }
                               }
                             }}
@@ -729,6 +715,9 @@ export default function Config() {
           </CardContent>
         </Card>
       </form>
+
+      {/* Dialog de confirmación */}
+      <ConfirmDialog />
     </div>
   );
 }

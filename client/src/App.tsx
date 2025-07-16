@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import MainLayout from './components/Layout/MainLayout';
 import Monitor from './pages/Monitor';
 import Config from './pages/Config';
+import { Toaster } from '@/components/ui/sonner';
 
 const queryClient = new QueryClient();
 
@@ -16,6 +17,7 @@ function App() {
             <Route path="/config" element={<Config />} />
           </Routes>
         </MainLayout>
+        <Toaster />
       </Router>
     </QueryClientProvider>
   )

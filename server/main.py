@@ -15,7 +15,8 @@ from api.directory_routes import directory_routes, init_directory_manager
 
 # Crear instancias compartidas
 directory_manager = DirectoryManager()
-log_manager = LogManager(directory_manager=directory_manager)
+config_manager = ConfigManager()
+log_manager = LogManager(directory_manager=directory_manager, config_manager=config_manager)
 
 # Inicializar el DirectoryManager en el módulo directory_routes
 init_directory_manager(directory_manager)
@@ -148,10 +149,7 @@ def ensure_port_available(port: int) -> bool:
 app = Flask(__name__)
 CORS(app)  # Habilitar CORS para desarrollo
 
-# Inicializar managers
-config_manager = ConfigManager()
-# directory_manager = DirectoryManager(config_manager.get_config().get('logDir', 'logs'))
-# log_manager ya fue inicializado en la línea 18
+# Los managers ya fueron inicializados al principio del archivo
 
 # Registrar el blueprint de directorios
 app.register_blueprint(directory_routes)

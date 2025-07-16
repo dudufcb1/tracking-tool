@@ -5,16 +5,18 @@ from typing import Dict, List, Any, Optional
 from .directory_manager import DirectoryManager
 
 class LogManager:
-    def __init__(self, base_dir: str = "logs", directory_manager: Optional[DirectoryManager] = None):
+    def __init__(self, base_dir: str = "logs", directory_manager: Optional[DirectoryManager] = None, config_manager=None):
         """
         Inicializa el gestor de logs.
-        
+
         Args:
             base_dir: Directorio base donde se guardarán los logs por defecto
             directory_manager: Instancia de DirectoryManager para manejar directorios personalizados
+            config_manager: Instancia de ConfigManager para obtener filtros
         """
         self.base_dir: str = base_dir
         self.directory_manager: DirectoryManager = directory_manager or DirectoryManager(base_dir)
+        self.config_manager = config_manager
         self.max_file_size: int = 50 * 1024  # 50KB por defecto
         self.active: bool = False
         self.current_token: Optional[str] = None
@@ -63,15 +65,38 @@ class LogManager:
     def should_accept_log(self, log_data: Dict[str, Any]) -> bool:
         """
         Determina si un log debe ser aceptado según los filtros.
-        
+        Los filtros funcionan como whitelist: solo se aceptan logs cuya URL contenga alguna palabra del filtro.
+        Si no hay filtros configurados, se aceptan todos los logs.
+
         Args:
             log_data: Datos del log a evaluar
-            
+
         Returns:
             bool: True si el log debe ser aceptado
         """
-        # TODO: Implementar filtros de URL
-        return True
+        if not self.config_manager:
+            return True
+
+        # Obtener filtros de URL de la configuración
+        url_filters = self.config_manager.get_url_filters()
+
+        # Si no hay filtros configurados, aceptar todos los logs
+        if not url_filters:
+            return True
+
+        # Obtener la URL del log
+        log_url = log_data.get('url', '')
+
+        # Si no hay URL, rechazar el log cuando hay filtros activos
+        if not log_url:
+            return False
+
+        # Verificar si la URL contiene alguno de los filtros (whitelist)
+        for filter_term in url_filters:
+            if filter_term.strip() and filter_term.strip().lower() in log_url.lower():
+                return True  # Aceptar este log porque coincide con el filtro
+
+        return False  # Rechazar el log porque no coincide con ningún filtro
 
     def set_log_directory_token(self, token: Optional[str]) -> bool:
         """
