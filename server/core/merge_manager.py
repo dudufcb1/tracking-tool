@@ -33,7 +33,18 @@ class MergeManager:
     def get_merged_file_path(self) -> str:
         """Obtiene la ruta del archivo merged desde configuración."""
         if self.config_manager:
-            return self.config_manager.get_merged_log_path()
+            configured_path = self.config_manager.get_merged_log_path()
+
+            # Si la ruta configurada es un directorio, agregar el nombre del archivo
+            if os.path.isdir(configured_path):
+                return os.path.join(configured_path, self.merged_file_name)
+
+            # Si la ruta no tiene extensión, agregar el nombre del archivo
+            if not os.path.splitext(configured_path)[1]:
+                return os.path.join(configured_path, self.merged_file_name)
+
+            return configured_path
+
         # Fallback si no hay config_manager
         if self.log_manager:
             log_dir = self.log_manager._get_log_directory()
