@@ -56,6 +56,14 @@ export default function Config() {
   const [availableDirectories, setAvailableDirectories] = useState<Array<{ token: string; path: string; info: DirectoryInfo }>>([]);
 
 
+  // Función para verificar si el botón debe estar deshabilitado
+  const isSubmitDisabled = () => {
+    // Deshabilitar si está cargando O si el monitoreo está activo
+    const disabled = loading || monitoringActive;
+    console.log('isSubmitDisabled:', disabled, 'loading:', loading, 'monitoringActive:', monitoringActive);
+    return disabled;
+  };
+
 
   // Función para manejar el cambio manual de directorio (solo actualiza el estado)
   const handleCustomPathChange = (newPath: string) => {
@@ -215,6 +223,8 @@ export default function Config() {
             monitoringInterval: config.monitoring?.intervalMs ?? config.monitoringInterval ?? 1000
           });
 
+
+
           setServerInfo({
             isActive: config.isActive || false,
             fileInfo: config.fileInfo
@@ -264,10 +274,23 @@ export default function Config() {
 
     // Limpiar intervalo al desmontar
     return () => clearInterval(intervalId);
-  }, []);
+  }, [showError]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Debug logs
+    console.log('handleSubmit - monitoringActive:', monitoringActive);
+
+    // Validación temprana: prevenir envío si el monitoreo está activo
+    if (monitoringActive) {
+      console.log('Previniendo envío por monitoreo activo');
+      showWarning(
+        'No se puede cambiar la configuración',
+        'El monitoreo está activo. Detén el monitoreo antes de cambiar cualquier configuración.'
+      );
+      return;
+    }
 
     try {
       setLoading(true);
@@ -297,7 +320,7 @@ export default function Config() {
       console.error('Error al guardar la configuración:', error);
 
       // Verificar si es el error específico de monitoreo activo
-      if (error instanceof Error && 'response' in error && (error as any).response?.status === 400) {
+      if (error instanceof Error && 'response' in error && (error as { response?: { status?: number } }).response?.status === 400) {
         showWarning(
           'No se puede cambiar la configuración',
           'El monitoreo está activo. Detén el monitoreo antes de cambiar la configuración del directorio.'
@@ -707,8 +730,14 @@ export default function Config() {
               </div>
             </div>
 
-            <div className="pt-4">
-              <Button type="submit" disabled={loading}>
+            <div className="pt-4 space-y-2">
+              {monitoringActive && (
+                <div className="text-sm text-yellow-600 bg-yellow-50 p-3 rounded-md border border-yellow-200">
+                  ⚠️ No se puede cambiar la configuración mientras el monitoreo está activo.
+                  Detén el monitoreo primero.
+                </div>
+              )}
+              <Button type="submit" disabled={isSubmitDisabled()}>
                 {loading ? 'Guardando...' : 'Guardar Configuración'}
               </Button>
             </div>
