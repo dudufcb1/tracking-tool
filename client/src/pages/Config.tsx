@@ -23,7 +23,7 @@ interface FileInfo {
   path: string;
   size: number;
   exists: boolean;
-  last_modified: string;
+  lastModified: string;
 }
 
 interface ServerInfo {
@@ -160,7 +160,7 @@ export default function Config() {
         // Actualizar el campo visual con la ruta real
         setFormData(prev => ({
           ...prev,
-          customLogPath: response.data.info.path
+          customLogPath: response.data?.info.path || ''
         }));
         setMessage({
           type: 'success',
@@ -198,6 +198,7 @@ export default function Config() {
     try {
       const response = await directoryApi.listDirectories();
       if (response.status === 'success' && response.data) {
+        // El servidor ya devuelve un array con la estructura correcta
         setAvailableDirectories(response.data);
       }
     } catch (error) {
@@ -223,8 +224,8 @@ export default function Config() {
             logDir: config.logDir,
             customLogPath: '',        // Mantener vacío, se llenará cuando el usuario seleccione
             directoryToken: savedToken, // Cargar token guardado
-            monitoringEnabled: config.monitoring.enabled,
-            monitoringInterval: config.monitoring.intervalMs
+            monitoringEnabled: config.monitoring?.enabled ?? config.monitoringEnabled ?? false,
+            monitoringInterval: config.monitoring?.intervalMs ?? config.monitoringInterval ?? 1000
           });
 
           setServerInfo({
@@ -244,7 +245,7 @@ export default function Config() {
                 // Actualizar el campo customLogPath con la ruta real
                 setFormData(prev => ({
                   ...prev,
-                  customLogPath: dirResponse.data.info.path
+                  customLogPath: dirResponse.data?.info.path || ''
                 }));
               }
             } catch (dirError) {
@@ -333,8 +334,8 @@ export default function Config() {
                 <p className="mt-1"><strong>Ruta:</strong> {serverInfo.fileInfo.path}</p>
                 <p><strong>Tamaño:</strong> {(serverInfo.fileInfo.size / 1024).toFixed(2)} KB</p>
                 <p><strong>Existe:</strong> {serverInfo.fileInfo.exists ? '✅ Sí' : '❌ No'}</p>
-                {serverInfo.fileInfo.last_modified && (
-                  <p><strong>Última modificación:</strong> {new Date(serverInfo.fileInfo.last_modified).toLocaleString()}</p>
+                {serverInfo.fileInfo.lastModified && (
+                  <p><strong>Última modificación:</strong> {new Date(serverInfo.fileInfo.lastModified).toLocaleString()}</p>
                 )}
                 {!serverInfo.fileInfo.exists && serverInfo.isActive && (
                   <p className="text-orange-500 mt-2">
@@ -438,7 +439,7 @@ export default function Config() {
 
                                 // Enviar automáticamente al backend para actualizar el LogManager
                                 await configApi.updateConfig({
-                                  customLogPath: dir.token
+                                  logDir: dir.token
                                 });
 
                                 // Recargar la información del servidor para reflejar el cambio
