@@ -11,12 +11,14 @@ from core.log_manager import LogManager
 from core.config_manager import ConfigManager
 from core.file_watcher import FileWatcher
 from core.directory_manager import DirectoryManager
+from core.merge_manager import MergeManager
 from api.directory_routes import directory_routes, init_directory_manager
 
 # Crear instancias compartidas
 directory_manager = DirectoryManager()
 config_manager = ConfigManager()
 log_manager = LogManager(directory_manager=directory_manager, config_manager=config_manager)
+merge_manager = MergeManager(log_manager=log_manager, config_manager=config_manager)
 
 # Inicializar el DirectoryManager en el módulo directory_routes
 init_directory_manager(directory_manager)
@@ -366,9 +368,9 @@ def update_config():
 
 # Endpoints para logs externos
 @app.route('/api/external-log/path', methods=['POST'])
-def set_external_log_path():
+def set_external_log_path_config():
     """Establece la ruta del archivo de log externo"""
-    global external_log_path
+    # Usar config_manager en lugar de variable global
     try:
         data = request.get_json()
         if not data or 'path' not in data:
@@ -394,7 +396,7 @@ def set_external_log_path():
 @app.route('/api/external-log/exists', methods=['GET'])
 def check_external_log_exists():
     """Verifica si el archivo de log externo existe"""
-    global external_log_path
+    # Usar config_manager en lugar de variable global
     try:
         if not external_log_path:
             return jsonify({
@@ -417,7 +419,7 @@ def check_external_log_exists():
 @app.route('/api/external-log/stats', methods=['GET'])
 def get_external_log_stats():
     """Obtiene estadísticas del archivo de log externo"""
-    global external_log_path
+    # Usar config_manager en lugar de variable global
     try:
         if not external_log_path:
             return jsonify({
@@ -442,7 +444,7 @@ def get_external_log_stats():
 @app.route('/api/external-log/content', methods=['GET'])
 def get_external_log_content():
     """Obtiene todo el contenido del archivo de log externo"""
-    global external_log_path
+    # Usar config_manager en lugar de variable global
     try:
         if not external_log_path:
             return jsonify({
@@ -469,7 +471,7 @@ def get_external_log_content():
 @app.route('/api/external-log/lines/<int:n>', methods=['GET'])
 def get_external_log_last_n_lines(n):
     """Obtiene las últimas N líneas del archivo de log externo"""
-    global external_log_path
+    # Usar config_manager en lugar de variable global
     try:
         if not external_log_path:
             return jsonify({
@@ -506,7 +508,7 @@ def get_external_log_last_n_lines(n):
 @app.route('/api/external-log/clear', methods=['DELETE'])
 def clear_external_log():
     """Borra el contenido del archivo de log externo"""
-    global external_log_path
+    # Usar config_manager en lugar de variable global
     try:
         if not external_log_path:
             return jsonify({
@@ -530,6 +532,308 @@ def clear_external_log():
             "message": f"Error: {str(e)}"
         }), 500
 
+# Endpoints para merge logs
+@app.route('/api/merge-logs/stats', methods=['GET'])
+def get_merge_stats():
+    """Obtiene estadísticas de los archivos de logs"""
+    try:
+        # La ruta externa ya está configurada en merge_manager a través de config_manager
+        # No necesitamos hacer nada adicional aquí
+        
+        stats = merge_manager.get_merged_stats()
+        return jsonify({
+            "status": "success",
+            "data": stats
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/merge-logs/create', methods=['POST'])
+def create_merged_logs():
+    """Crea el archivo devpipe_merged.log"""
+    try:
+        data = request.get_json() or {}
+        internal_limit = data.get('internal_limit')
+        external_limit = data.get('external_limit')
+        sort_by_time = data.get('sort_by_time', True)
+        
+        # La ruta externa ya está configurada en merge_manager a través de config_manager
+        # No necesitamos hacer nada adicional aquí
+        
+        merged_file_path = merge_manager.create_merged_file(
+            internal_limit=internal_limit,
+            external_limit=external_limit,
+            sort_by_time=sort_by_time
+        )
+        
+        return jsonify({
+            "status": "success",
+            "message": "Archivo merged creado correctamente",
+            "data": {
+                "file_path": merged_file_path
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/merge-logs/content', methods=['GET'])
+def get_merged_content():
+    """Obtiene el contenido del archivo merged"""
+    try:
+        # Parámetros de consulta
+        js_lines = request.args.get('js', type=int)  # Líneas de logs internos (JS)
+        wp_lines = request.args.get('wp', type=int)  # Líneas de logs externos (WordPress)
+        sort_by_time = request.args.get('sort_by_time', 'true').lower() == 'true'
+        
+        # La ruta externa ya está configurada en merge_manager a través de config_manager
+        # No necesitamos hacer nada adicional aquí
+        
+        # Obtener logs combinados
+        merged_logs = merge_manager.merge_logs(
+            internal_limit=js_lines,
+            external_limit=wp_lines,
+            sort_by_time=sort_by_time
+        )
+        
+        # Formatear logs para respuesta
+        formatted_logs = []
+        for log in merged_logs:
+            formatted_logs.append(merge_manager.format_log_for_merged_file(log))
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "logs": formatted_logs,
+                "total_lines": len(formatted_logs),
+                "internal_lines": js_lines or "all",
+                "external_lines": wp_lines or "all"
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/merge-logs/clear-all', methods=['DELETE'])
+def clear_all_logs():
+    """Borra todos los archivos de logs"""
+    try:
+        # La ruta externa ya está configurada en merge_manager a través de config_manager
+        # No necesitamos hacer nada adicional aquí
+        
+        results = merge_manager.clear_all_logs()
+        
+        return jsonify({
+            "status": "success",
+            "message": "Operación de limpieza completada",
+            "data": results
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/merge-logs/export', methods=['GET'])
+def export_merged_logs():
+    """Exporta los logs merged como texto plano"""
+    try:
+        # Parámetros de consulta
+        js_lines = request.args.get('js', type=int)
+        wp_lines = request.args.get('wp', type=int)
+        sort_by_time = request.args.get('sort_by_time', 'true').lower() == 'true'
+        
+        # La ruta externa ya está configurada en merge_manager a través de config_manager
+        # No necesitamos hacer nada adicional aquí
+        
+        # Obtener logs combinados
+        merged_logs = merge_manager.merge_logs(
+            internal_limit=js_lines,
+            external_limit=wp_lines,
+            sort_by_time=sort_by_time
+        )
+        
+        # Crear texto plano
+        text_content = []
+        for log in merged_logs:
+            text_content.append(merge_manager.format_log_for_merged_file(log))
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "content": "\n".join(text_content),
+                "total_lines": len(text_content)
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+# Endpoints para configuración de rutas de archivos
+@app.route('/api/config/external-log-path', methods=['GET'])
+def api_get_external_log_path():
+    """Obtiene la ruta del archivo de logs externos"""
+    try:
+        path = config_manager.get_external_log_path()
+        return jsonify({
+            "status": "success",
+            "data": {
+                "path": path,
+                "exists": os.path.exists(path) if path else False
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/config/external-log-path', methods=['POST'])
+def set_external_log_path_config_v2():
+    """Establece la ruta del archivo de logs externos"""
+    try:
+        data = request.get_json()
+        if not data or 'path' not in data:
+            return jsonify({
+                "status": "error",
+                "message": "No se proporcionó la ruta del archivo"
+            }), 400
+
+        path = data['path']
+        if path and not os.path.isabs(path):
+            return jsonify({
+                "status": "error",
+                "message": "La ruta debe ser absoluta"
+            }), 400
+
+        success = config_manager.set_external_log_path(path)
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": f"Ruta establecida: {path}",
+                "data": {
+                    "path": path,
+                    "exists": os.path.exists(path) if path else False
+                }
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Error al guardar la configuración"
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/config/external-log-path', methods=['DELETE'])
+def delete_external_log_path_config():
+    """Borra la ruta del archivo de logs externos"""
+    try:
+        success = config_manager.set_external_log_path("")
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": "Ruta del archivo externo borrada"
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Error al borrar la configuración"
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/config/merged-log-path', methods=['GET'])
+def get_merged_log_path():
+    """Obtiene la ruta del archivo merged"""
+    try:
+        path = config_manager.get_merged_log_path()
+        return jsonify({
+            "status": "success",
+            "data": {
+                "path": path,
+                "exists": os.path.exists(path) if path else False
+            }
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/config/merged-log-path', methods=['POST'])
+def set_merged_log_path():
+    """Establece la ruta del archivo merged"""
+    try:
+        data = request.get_json()
+        if not data or 'path' not in data:
+            return jsonify({
+                "status": "error",
+                "message": "No se proporcionó la ruta del archivo"
+            }), 400
+
+        path = data['path']
+        if not path:
+            return jsonify({
+                "status": "error",
+                "message": "La ruta no puede estar vacía"
+            }), 400
+
+        success = config_manager.set_merged_log_path(path)
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": f"Ruta establecida: {path}",
+                "data": {
+                    "path": path,
+                    "exists": os.path.exists(path) if path else False
+                }
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Error al guardar la configuración"
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+@app.route('/api/config/merged-log-path', methods=['DELETE'])
+def delete_merged_log_path():
+    """Resetea la ruta del archivo merged al valor por defecto"""
+    try:
+        success = config_manager.set_merged_log_path("logs/devpipe_merged.log")
+        if success:
+            return jsonify({
+                "status": "success",
+                "message": "Ruta del archivo merged reseteada al valor por defecto"
+            })
+        else:
+            return jsonify({
+                "status": "error",
+                "message": "Error al resetear la configuración"
+            }), 500
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 if __name__ == '__main__':
     # Obtener puerto de configuración
     port = int(os.environ.get('PORT', config_manager.get_config().get('port', 7845)))
@@ -557,6 +861,21 @@ if __name__ == '__main__':
         print(f"   • GET  /api/external-log/content - Contenido archivo externo")
         print(f"   • GET  /api/external-log/lines/<n> - Últimas N líneas")
         print(f"   • DELETE /api/external-log/clear - Borrar archivo externo")
+        print(f"   • GET  /api/merge-logs/stats - Estadísticas de merge")
+        print(f"   • POST /api/merge-logs/create - Crear archivo merged")
+        print(f"   • GET  /api/merge-logs/content - Contenido merged")
+        print(f"   • DELETE /api/merge-logs/clear-all - Borrar todos los logs")
+        print(f"   • GET  /api/merge-logs/export - Exportar logs merged")
+        print(f"   • GET  /api/merge-logs/stats - Estadísticas de merge")
+        print(f"   • POST /api/merge-logs/create - Crear archivo merged")
+        print(f"   • GET  /api/merge-logs/content - Contenido merged")
+        print(f"   • DELETE /api/merge-logs/clear-all - Borrar todos los logs")
+        print(f"   • GET  /api/merge-logs/export - Exportar logs merged")
+        print(f"   • GET  /api/merge-logs/stats - Estadísticas de merge")
+        print(f"   • POST /api/merge-logs/create - Crear archivo merged")
+        print(f"   • GET  /api/merge-logs/content - Contenido merged")
+        print(f"   • DELETE /api/merge-logs/clear-all - Borrar todos los logs")
+        print(f"   • GET  /api/merge-logs/export - Exportar logs merged")
         print("🔗 Presiona Ctrl+C para detener el servidor")
 
         app.run(host='0.0.0.0', port=port, debug=False)

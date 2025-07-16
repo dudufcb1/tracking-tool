@@ -37,7 +37,9 @@ class ConfigManager:
             "monitoring": {
                 "enabled": False,
                 "intervalMs": 1000
-            }
+            },
+            "externalLogPath": "",  # Ruta del archivo de logs externos (WordPress)
+            "mergedLogPath": "logs/devpipe_merged.log"  # Ruta del archivo merged
         }
     
     def load_config(self) -> None:
@@ -103,8 +105,60 @@ class ConfigManager:
     def get_url_filters(self) -> List[str]:
         """
         Obtiene los filtros de URL.
-        
+
         Returns:
             List[str]: Lista de filtros
         """
         return self.config.get("urlFilters", [])
+
+    def get_external_log_path(self) -> str:
+        """
+        Obtiene la ruta del archivo de logs externos.
+
+        Returns:
+            str: Ruta del archivo de logs externos
+        """
+        return self.config.get("externalLogPath", "")
+
+    def set_external_log_path(self, path: str) -> bool:
+        """
+        Establece la ruta del archivo de logs externos.
+
+        Args:
+            path: Nueva ruta del archivo
+
+        Returns:
+            bool: True si se guardó correctamente
+        """
+        try:
+            self.config["externalLogPath"] = path
+            return self.save_config()
+        except Exception as e:
+            print(f"Error estableciendo ruta externa: {e}")
+            return False
+
+    def get_merged_log_path(self) -> str:
+        """
+        Obtiene la ruta del archivo merged.
+
+        Returns:
+            str: Ruta del archivo merged
+        """
+        return self.config.get("mergedLogPath", "logs/devpipe_merged.log")
+
+    def set_merged_log_path(self, path: str) -> bool:
+        """
+        Establece la ruta del archivo merged.
+
+        Args:
+            path: Nueva ruta del archivo
+
+        Returns:
+            bool: True si se guardó correctamente
+        """
+        try:
+            self.config["mergedLogPath"] = path
+            return self.save_config()
+        except Exception as e:
+            print(f"Error estableciendo ruta merged: {e}")
+            return False
