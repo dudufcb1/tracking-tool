@@ -155,6 +155,9 @@ CORS(app)  # Habilitar CORS para desarrollo
 app.register_blueprint(directory_routes)
 file_watcher = FileWatcher()
 
+# Variable global para almacenar la ruta del archivo externo
+external_log_path = None
+
 def on_external_log(file_path: str) -> None:
     """Callback para cuando hay cambios en un archivo externo"""
     if not file_watcher.is_active or not log_manager.is_active:
@@ -361,6 +364,172 @@ def update_config():
             "message": str(e)
         }), 500
 
+# Endpoints para logs externos
+@app.route('/api/external-log/path', methods=['POST'])
+def set_external_log_path():
+    """Establece la ruta del archivo de log externo"""
+    global external_log_path
+    try:
+        data = request.get_json()
+        if not data or 'path' not in data:
+            return jsonify({
+                "message": "No se proporcionó la ruta del archivo"
+            }), 400
+
+        path = data['path']
+        if not os.path.isabs(path):
+            return jsonify({
+                "message": "La ruta debe ser absoluta"
+            }), 400
+
+        external_log_path = path
+        return jsonify({
+            "message": f"Ruta establecida: {path}"
+        })
+    except Exception as e:
+        return jsonify({
+            "message": f"Error: {str(e)}"
+        }), 500
+
+@app.route('/api/external-log/exists', methods=['GET'])
+def check_external_log_exists():
+    """Verifica si el archivo de log externo existe"""
+    global external_log_path
+    try:
+        if not external_log_path:
+            return jsonify({
+                "exists": False,
+                "path": ""
+            })
+
+        exists = os.path.exists(external_log_path)
+        return jsonify({
+            "exists": exists,
+            "path": external_log_path
+        })
+    except Exception as e:
+        return jsonify({
+            "exists": False,
+            "path": external_log_path or "",
+            "error": str(e)
+        })
+
+@app.route('/api/external-log/stats', methods=['GET'])
+def get_external_log_stats():
+    """Obtiene estadísticas del archivo de log externo"""
+    global external_log_path
+    try:
+        if not external_log_path:
+            return jsonify({
+                "message": "No se ha establecido una ruta de archivo"
+            }), 400
+
+        if not os.path.exists(external_log_path):
+            return jsonify({
+                "message": "El archivo no existe"
+            }), 404
+
+        size_bytes = os.path.getsize(external_log_path)
+        return jsonify({
+            "path": external_log_path,
+            "size_bytes": size_bytes
+        })
+    except Exception as e:
+        return jsonify({
+            "message": f"Error: {str(e)}"
+        }), 500
+
+@app.route('/api/external-log/content', methods=['GET'])
+def get_external_log_content():
+    """Obtiene todo el contenido del archivo de log externo"""
+    global external_log_path
+    try:
+        if not external_log_path:
+            return jsonify({
+                "message": "No se ha establecido una ruta de archivo"
+            }), 400
+
+        if not os.path.exists(external_log_path):
+            return jsonify({
+                "message": "El archivo no existe"
+            }), 404
+
+        with open(external_log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+
+        return jsonify({
+            "path": external_log_path,
+            "content": content
+        })
+    except Exception as e:
+        return jsonify({
+            "message": f"Error: {str(e)}"
+        }), 500
+
+@app.route('/api/external-log/lines/<int:n>', methods=['GET'])
+def get_external_log_last_n_lines(n):
+    """Obtiene las últimas N líneas del archivo de log externo"""
+    global external_log_path
+    try:
+        if not external_log_path:
+            return jsonify({
+                "message": "No se ha establecido una ruta de archivo"
+            }), 400
+
+        if not os.path.exists(external_log_path):
+            return jsonify({
+                "message": "El archivo no existe"
+            }), 404
+
+        if n <= 0 or n > 10000:
+            return jsonify({
+                "message": "El número de líneas debe estar entre 1 y 10000"
+            }), 400
+
+        with open(external_log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+
+        # Obtener las últimas N líneas
+        last_lines = lines[-n:] if len(lines) >= n else lines
+        # Limpiar saltos de línea
+        last_lines = [line.rstrip('\n\r') for line in last_lines]
+
+        return jsonify({
+            "path": external_log_path,
+            "lines": last_lines
+        })
+    except Exception as e:
+        return jsonify({
+            "message": f"Error: {str(e)}"
+        }), 500
+
+@app.route('/api/external-log/clear', methods=['DELETE'])
+def clear_external_log():
+    """Borra el contenido del archivo de log externo"""
+    global external_log_path
+    try:
+        if not external_log_path:
+            return jsonify({
+                "message": "No se ha establecido una ruta de archivo"
+            }), 400
+
+        if not os.path.exists(external_log_path):
+            return jsonify({
+                "message": "El archivo no existe"
+            }), 404
+
+        # Vaciar el archivo
+        with open(external_log_path, 'w', encoding='utf-8') as f:
+            f.write('')
+
+        return jsonify({
+            "message": f"Contenido del archivo {external_log_path} borrado correctamente"
+        })
+    except Exception as e:
+        return jsonify({
+            "message": f"Error: {str(e)}"
+        }), 500
+
 if __name__ == '__main__':
     # Obtener puerto de configuración
     port = int(os.environ.get('PORT', config_manager.get_config().get('port', 7845)))
@@ -382,6 +551,12 @@ if __name__ == '__main__':
         print(f"   • POST /logs/clear - Limpiar logs")
         print(f"   • POST /monitoring/start - Iniciar monitoreo")
         print(f"   • POST /monitoring/stop - Detener monitoreo")
+        print(f"   • POST /api/external-log/path - Establecer archivo externo")
+        print(f"   • GET  /api/external-log/exists - Verificar archivo externo")
+        print(f"   • GET  /api/external-log/stats - Estadísticas archivo externo")
+        print(f"   • GET  /api/external-log/content - Contenido archivo externo")
+        print(f"   • GET  /api/external-log/lines/<n> - Últimas N líneas")
+        print(f"   • DELETE /api/external-log/clear - Borrar archivo externo")
         print("🔗 Presiona Ctrl+C para detener el servidor")
 
         app.run(host='0.0.0.0', port=port, debug=False)
