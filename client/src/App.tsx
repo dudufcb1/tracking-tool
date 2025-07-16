@@ -4,6 +4,7 @@ import MainLayout from './components/Layout/MainLayout';
 import Monitor from './pages/Monitor';
 import Config from './pages/Config';
 import Globales from './pages/Globales';
+import MergeLogs from './pages/MergeLogs';
 import { Toaster } from '@/components/ui/sonner';
 
 const queryClient = new QueryClient();
@@ -17,6 +18,7 @@ function App() {
             <Route path="/" element={<Monitor />} />
             <Route path="/config" element={<Config />} />
             <Route path="/globales" element={<Globales />} />
+            <Route path="/merge-logs" element={<MergeLogs />} />
           </Routes>
         </MainLayout>
         <Toaster />
